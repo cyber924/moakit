@@ -34,7 +34,7 @@ export function storageRow(item,description){
   copiedAt:item.updated||'',usage:meta?.usage||'unknown',
   refs:[sample?'KIT 샘플 원본':asset?'사이트 정적 원본':'Firebase 공용 이미지',path],
   originalName:sample||asset||'',readonly:true,private:false,status:'ready',
-  // Only D1-backed images can be selected in existing legacy promotions.
+  // Only Firestore-recorded original D1 images can be selected in legacy promotions.
   compatibleUrl:meta?'/api/promotions?image='+encodeURIComponent(id):null,
   selectableForPromotion:!!meta,
  };
@@ -43,7 +43,7 @@ function docMetadata(d){
  const f=d?.fields,id=String(read(f,'sourceId')),path=String(read(f,'storagePath'));
  if(!PATH.test(path)||PATH.exec(path)[1]!==id)return null;
  const title=String(read(f,'title')||'공용 이미지');
- return {id,title,createdAt:String(read(f,'originalCreatedAt')||read(f,'copiedAt')),
+ return {id,path,title,byteSize:Number(read(f,'byteSize'))||0,createdAt:String(read(f,'originalCreatedAt')||read(f,'copiedAt')),
   kind:/키트|KIT|가디건|스웨터|비니|니트/i.test(title)?'kit':
       /도안|패턴|pattern/i.test(title)?'pattern':/작가/i.test(title)?'creator':'shared'};
 }
@@ -56,23 +56,28 @@ async function getJson(fetcher,url,authorization,label){
  }
  return r.json();
 }
-async function getStorageObjects(fetcher,token){
- const all=[],seen=new Set(),warnings=[];let pageToken='',count=0;
- do{
-  const u=new URL(STORAGE);
-  u.searchParams.set('prefix',SHARED_PREFIX);
-  u.searchParams.set('maxResults','1000');
-  if(pageToken)u.searchParams.set('pageToken',pageToken);
-  const j=await getJson(fetcher,u.toString(),'Firebase '+token,'Firebase Storage 목록 조회');
-  for(const obj of j.items||[]){
-   if(!seen.has(obj.name)){all.push(obj);seen.add(obj.name);}
+// Firebase Storage object-list requests can return 403 even when each public
+// object is readable and administrator uploads succeed. The known KIT/site
+// inventory plus Firestore moakitImages provides a safe catalog instead.
+// Never enumerate the bucket or relax Firebase Storage security rules.
+function catalogEntries(descriptions){
+ const known=new Map();
+ for(const file of KIT_SAMPLE_FILES){
+  const id=kitSampleId(file),name=SHARED_PREFIX+id+'.webp';
+  known.set(name,{name,size:0});
+ }
+ for(const file of SITE_ASSET_FILES){
+  const id=siteAssetId(file),name=SHARED_PREFIX+id+'.webp';
+  known.set(name,{name,size:0});
+ }
+ for(const metadata of descriptions.values()){
+  const name=metadata.path;
+  if(PATH.test(name)){
+   known.set(name,{name,size:metadata.byteSize||0,
+     timeCreated:metadata.createdAt||'',updated:metadata.createdAt||''});
   }
-  const next=String(j.nextPageToken||'');
-  if(next&&next===pageToken)throw kitFail('Storage 페이지가 반복돼 조회를 중단했습니다.',502);
-  pageToken=next;
-  if(++count>=100&&pageToken){warnings.push('Storage 일부 목록만 조회되었습니다.');break;}
- }while(pageToken);
- return {all,warnings};
+ }
+ return [...known.values()];
 }
 const PUBLIC_PATH=/^moakit\/public\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/;
 function photoRow(path,title,docId,index,updatedAt){
@@ -134,11 +139,11 @@ export async function imageAssetsApi(request,fetcher=fetch){
   const page=Math.max(1,Math.min(10000,parseInt(u.searchParams.get('page')||'1',10)||1));
   const kind=String(u.searchParams.get('kind')||'').slice(0,24);
   const query=text(u.searchParams.get('q')||'').trim().slice(0,100);
-  const {all,warnings}=await getStorageObjects(fetcher,token);
+  const warnings=[];
   let descriptions=new Map();
   try{descriptions=await getDescriptions(fetcher,token);}
-  catch(e){warnings.push('이미지 제목 일부를 조회하지 못해 파일 이름으로 표시합니다.');}
-  const rows=all.map(x=>storageRow(x,descriptions)).filter(Boolean);
+  catch(e){warnings.push('공용 이미지 등록 정보 일부를 조회하지 못했습니다.');}
+  const rows=catalogEntries(descriptions).map(x=>storageRow(x,descriptions)).filter(Boolean);
   try{rows.push(...await getPublishedPhotos(fetcher,token));}
   catch(e){warnings.push('공개 도안 이미지 일부를 확인하지 못했습니다.');}
   const onlyPromotion=u.searchParams.get('selectable')==='promotion';
@@ -149,7 +154,7 @@ export async function imageAssetsApi(request,fetcher=fetch){
   const pageSize=24,pages=Math.max(1,Math.ceil(filtered.length/pageSize));
   return kitJson({images:filtered.slice((page-1)*pageSize,page*pageSize),page:Math.min(page,pages),
    nextCursor:page<pages?String(page+1):'',pages,total:filtered.length,allTotal:rows.length,
-   totalBytes:rows.reduce((n,x)=>n+x.bytes,0),warnings,source:'firebase-storage',firebase:true,
+   totalBytes:rows.reduce((n,x)=>n+x.bytes,0),warnings,source:'firebase-catalog',firebase:true,
    counts:{shared:rows.filter(x=>x.source==='firebase').length,kit:rows.filter(x=>x.source==='kit-sample').length,
      site:rows.filter(x=>x.source==='site-asset').length,
      patterns:rows.filter(x=>x.source==='firebase-public').length}});
