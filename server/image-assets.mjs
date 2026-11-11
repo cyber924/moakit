@@ -1,74 +1,157 @@
 import {kitAuth, kitFail, kitJson} from './kit-auth.mjs';
 import {ADMIN_EMAIL, BUCKET} from '../public/image-copy-core.mjs';
+import {KIT_SAMPLE_FILES, kitSampleId} from '../public/kit-sample-core.mjs';
+import {SITE_ASSET_FILES, siteAssetId} from '../public/site-assets-core.mjs';
 
-const BASE = 'https://firestore.googleapis.com/v1/projects/studio-1613487721-b043c/databases/(default)/documents';
-const STORAGE = 'https://firebasestorage.googleapis.com/v0/b/' + BUCKET + '/o/';
+const FIRESTORE = 'https://firestore.googleapis.com/v1/projects/studio-1613487721-b043c/databases/(default)/documents';
+const STORAGE = 'https://firebasestorage.googleapis.com/v0/b/' + BUCKET + '/o';
+const SHARED_PREFIX = 'moakit/images/shared/';
 const PATH = /^moakit\/images\/shared\/([A-Za-z0-9_-]{1,160})\.(webp|jpg|png)$/;
-const read = (f,k) => f?.[k]?.stringValue ?? f?.[k]?.integerValue ?? '';
-
-function decoded(doc) {
-  const f=doc?.fields;
-  if (!f) return null;
-  const id=String(read(f,'sourceId'));
-  const path=String(read(f,'storagePath'));
-  const m=PATH.exec(path);
-  if (!m || m[1]!==id || !/^[A-Za-z0-9_-]{1,160}$/.test(id)) return null;
-  const ext=m[2], mime={'webp':'image/webp','jpg':'image/jpeg','png':'image/png'}[ext];
-  if (String(read(f,'mimeType'))!==mime) return null;
-  const title=String(read(f,'title')||'공용 이미지');
-  const kind=/키트|KIT|가디건|스웨터|비니|니트/i.test(title)?'kit':/도안|패턴|pattern/i.test(title)?'pattern':/작가/i.test(title)?'creator':'shared';
-  const url=STORAGE+encodeURIComponent(path)+'?alt=media';
-  return {
-    id, key:'firebase:'+id, title, url, firebaseUrl:url,
-    legacyUrl:'/api/promotions?image='+encodeURIComponent(id),
-    compatibleUrl:'/api/promotions?image='+encodeURIComponent(id),
-    path, kind, source:'firebase', byteSize:Number(read(f,'byteSize'))||0, bytes:Number(read(f,'byteSize'))||0,
-    createdAt:String(read(f,'originalCreatedAt')||read(f,'copiedAt')||''),
-    copiedAt:String(read(f,'copiedAt')), usage:'current',
-    refs:['Firebase Storage · 공용 이미지'], status:'ready',
-    private:false, readonly:true,
-  };
+const samples = new Map(KIT_SAMPLE_FILES.map(file=>[kitSampleId(file),file]));
+const statics = new Map(SITE_ASSET_FILES.map(file=>[siteAssetId(file),file]));
+const read=(fields,key)=>fields?.[key]?.stringValue??fields?.[key]?.integerValue??'';
+const previewURL=path=>STORAGE+'/'+encodeURIComponent(path)+'?alt=media';
+const text=(value)=>String(value||'').toLocaleLowerCase('ko');
+function kindOfSite(file){
+ if(file.startsWith('designer-')||file.includes('creator'))return 'creator';
+ if(file.startsWith('pattern-')||file.startsWith('gallery-')||file.startsWith('sample-')||file.startsWith('upload-test/'))return 'pattern';
+ if(file.startsWith('yarn/'))return 'yarn';
+ if(file.startsWith('promotions/'))return 'promotion';
+ return 'site';
 }
-export async function imageAssetsApi(request,fetcher=fetch) {
-  try {
-    if (request.method!=='GET') throw kitFail('GET 요청만 지원합니다.',405);
-    const user=await kitAuth(request,fetcher,true);
-    if (user.email!==ADMIN_EMAIL) throw kitFail('관리자 계정으로 로그인해주세요.',403);
-    const token=request.headers.get('authorization')?.slice(7)||'';
-    const u=new URL(request.url);
-    const page=Math.max(1,Math.min(10000,Number.parseInt(u.searchParams.get('page')||'1',10)||1));
-    const kind=String(u.searchParams.get('kind')||'').slice(0,24);
-    const query=String(u.searchParams.get('q')||'').trim().slice(0,100).toLocaleLowerCase('ko');
-    const pageSize=24, docs=[];
-    let cursor='', rounds=0;
-    do {
-      const url=new URL(BASE+'/moakitImages');
-      url.searchParams.set('pageSize','100');
-      if(cursor)url.searchParams.set('pageToken',cursor);
-      const r=await fetcher(url.toString(),{
-        headers:{Authorization:'Bearer '+token}, signal:AbortSignal.timeout(20000),
-        cache:'no-store'
-      });
-      if(!r.ok){
-        const data=await r.json().catch(()=>({}));
-        throw kitFail('Firestore 이미지 목록 조회 실패 ('+r.status+'): '+String(data.error?.message||r.statusText).slice(0,200),r.status===403?403:502);
-      }
-      const j=await r.json();
-      for(const d of j.documents||[]){const row=decoded(d);if(row)docs.push(row);}
-      if(cursor && cursor===j.nextPageToken)break;
-      cursor=String(j.nextPageToken||'');
-    } while(cursor && ++rounds<50);
-    const filtered=docs.filter(d=>(!kind||kind===d.kind||kind==='shared'&&d.kind==='shared')&&
-      (!query||(d.title+' '+d.id+' '+d.kind).toLocaleLowerCase('ko').includes(query)));
-    filtered.sort((a,b)=>b.copiedAt.localeCompare(a.copiedAt)||a.id.localeCompare(b.id));
-    const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
-    return kitJson({
-      images:filtered.slice((page-1)*pageSize,page*pageSize),
-      nextCursor:page<pages?String(page+1):'',
-      totalBytes:docs.reduce((n,x)=>n+x.byteSize,0),
-      page:Math.min(page,pages), pages,total:filtered.length,allTotal:docs.length,
-      warnings:cursor?['목록이 많아 일부 이미지만 조회했습니다.']:[],
-      source:'firebase', firebase:true
-    });
-  }catch(e){return kitJson({error:String(e.message||e)},Number.isInteger(e.status)?e.status:502);}
+export function storageRow(item,description){
+ const path=String(item?.name||''),m=PATH.exec(path);
+ if(!m)return null;
+ const id=m[1],sample=samples.get(id),asset=statics.get(id),meta=description?.get(id);
+ const category=sample?'kit':asset?kindOfSite(asset):meta?.kind||'shared';
+ const title=sample?'KIT 샘플 · '+sample:asset?'사이트 이미지 · '+asset:meta?.title||'공용 이미지 · '+id;
+ const bytes=Number(item.size)||0;
+ const url=previewURL(path);
+ return {
+  id,key:'firebase:'+path,title,url,firebaseUrl:url,storagePath:path,path,
+  kind:category,source:sample?'kit-sample':asset?'site-asset':'firebase',
+  bytes,byteSize:bytes,createdAt:item.timeCreated||item.updated||meta?.createdAt||'',
+  copiedAt:item.updated||'',usage:meta?.usage||'unknown',
+  refs:[sample?'KIT 샘플 원본':asset?'사이트 정적 원본':'Firebase 공용 이미지',path],
+  originalName:sample||asset||'',readonly:true,private:false,status:'ready',
+  // Only D1-backed images can be selected in existing legacy promotions.
+  compatibleUrl:meta?'/api/promotions?image='+encodeURIComponent(id):null,
+  selectableForPromotion:!!meta,
+ };
+}
+function docMetadata(d){
+ const f=d?.fields,id=String(read(f,'sourceId')),path=String(read(f,'storagePath'));
+ if(!PATH.test(path)||PATH.exec(path)[1]!==id)return null;
+ const title=String(read(f,'title')||'공용 이미지');
+ return {id,title,createdAt:String(read(f,'originalCreatedAt')||read(f,'copiedAt')),
+  kind:/키트|KIT|가디건|스웨터|비니|니트/i.test(title)?'kit':
+      /도안|패턴|pattern/i.test(title)?'pattern':/작가/i.test(title)?'creator':'shared'};
+}
+async function getJson(fetcher,url,authorization,label){
+ const r=await fetcher(url,{headers:{Authorization:authorization},
+   signal:AbortSignal.timeout(25000),cache:'no-store'});
+ if(!r.ok){const j=await r.json().catch(()=>({}));
+  throw kitFail(label+' ('+r.status+'): '+String(j.error?.message||r.statusText).slice(0,180),
+    r.status===403?403:502);
+ }
+ return r.json();
+}
+async function getStorageObjects(fetcher,token){
+ const all=[],seen=new Set(),warnings=[];let pageToken='',count=0;
+ do{
+  const u=new URL(STORAGE);
+  u.searchParams.set('prefix',SHARED_PREFIX);
+  u.searchParams.set('maxResults','1000');
+  if(pageToken)u.searchParams.set('pageToken',pageToken);
+  const j=await getJson(fetcher,u.toString(),'Firebase '+token,'Firebase Storage 목록 조회');
+  for(const obj of j.items||[]){
+   if(!seen.has(obj.name)){all.push(obj);seen.add(obj.name);}
+  }
+  const next=String(j.nextPageToken||'');
+  if(next&&next===pageToken)throw kitFail('Storage 페이지가 반복돼 조회를 중단했습니다.',502);
+  pageToken=next;
+  if(++count>=100&&pageToken){warnings.push('Storage 일부 목록만 조회되었습니다.');break;}
+ }while(pageToken);
+ return {all,warnings};
+}
+const PUBLIC_PATH=/^moakit\/public\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/;
+function photoRow(path,title,docId,index,updatedAt){
+ const url=previewURL(path);
+ return {id:docId+'-'+index,key:'firebase:'+path,title:title+' · '+(index+1)+'번 사진',
+  url,firebaseUrl:url,storagePath:path,path,kind:'pattern',source:'firebase-public',
+  bytes:0,byteSize:0,createdAt:updatedAt,copiedAt:'',usage:'current',
+  refs:['공개 도안 · '+title,path],private:false,readonly:true,status:'ready',
+  compatibleUrl:null,selectableForPromotion:false};
+}
+async function getPublishedPhotos(fetcher,token){
+ const rows=new Map();let cursor='',rounds=0;
+ do{
+  const u=new URL(FIRESTORE+'/moakitPatterns');
+  u.searchParams.set('pageSize','100');if(cursor)u.searchParams.set('pageToken',cursor);
+  const data=await getJson(fetcher,u.toString(),'Bearer '+token,'공개 도안 이미지 조회');
+  for(const doc of data.documents||[]){
+    const f=doc.fields||{};
+    if(read(f,'status')!=='published')continue;
+    let content;
+    try{content=JSON.parse(String(read(f,'content')||'{}'));}catch{continue;}
+    const title=String(content.title||content.info?.title||'공개 도안').slice(0,100);
+    const id=String(doc.name||'').split('/').pop();
+    const images=Array.isArray(content.images)?content.images:[];
+    for(let i=0;i<images.length;i++){
+      const path=typeof images[i]==='string'?images[i]:images[i]?.path;
+      if(typeof path!=='string'||!PUBLIC_PATH.test(path)||rows.has(path))continue;
+      rows.set(path,photoRow(path,title,id,i,String(read(f,'updatedAt')||'')));
+    }
+  }
+  const next=String(data.nextPageToken||'');
+  if(next&&next===cursor)throw kitFail('도안 목록 커서가 반복됩니다.',502);
+  cursor=next;if(++rounds>=50)break;
+ }while(cursor);
+ return [...rows.values()];
+}
+
+async function getDescriptions(fetcher,token){
+ const map=new Map();let cursor='',rounds=0;
+ do{
+  const u=new URL(FIRESTORE+'/moakitImages');
+  u.searchParams.set('pageSize','100');if(cursor)u.searchParams.set('pageToken',cursor);
+  const j=await getJson(fetcher,u.toString(),'Bearer '+token,'Firestore 이미지 제목 조회');
+  for(const d of j.documents||[]){const v=docMetadata(d);if(v)map.set(v.id,v);}
+  const next=String(j.nextPageToken||'');
+  if(next&&cursor===next)throw kitFail('Firestore 목록 페이지가 반복됩니다.',502);
+  cursor=next;
+  if(++rounds>=50)break;
+ }while(cursor);
+ return map;
+}
+export async function imageAssetsApi(request,fetcher=fetch){
+ try{
+  if(request.method!=='GET')throw kitFail('GET 요청만 지원합니다.',405);
+  const user=await kitAuth(request,fetcher,true);
+  if(user.email!==ADMIN_EMAIL)throw kitFail('관리자 계정으로 로그인해주세요.',403);
+  const token=request.headers.get('authorization')?.slice(7)||'';
+  const u=new URL(request.url);
+  const page=Math.max(1,Math.min(10000,parseInt(u.searchParams.get('page')||'1',10)||1));
+  const kind=String(u.searchParams.get('kind')||'').slice(0,24);
+  const query=text(u.searchParams.get('q')||'').trim().slice(0,100);
+  const {all,warnings}=await getStorageObjects(fetcher,token);
+  let descriptions=new Map();
+  try{descriptions=await getDescriptions(fetcher,token);}
+  catch(e){warnings.push('이미지 제목 일부를 조회하지 못해 파일 이름으로 표시합니다.');}
+  const rows=all.map(x=>storageRow(x,descriptions)).filter(Boolean);
+  try{rows.push(...await getPublishedPhotos(fetcher,token));}
+  catch(e){warnings.push('공개 도안 이미지 일부를 확인하지 못했습니다.');}
+  const onlyPromotion=u.searchParams.get('selectable')==='promotion';
+  const filtered=rows.filter(row=>(!onlyPromotion||row.selectableForPromotion)&&
+   (!kind||row.kind===kind||kind==='shared'&&row.source==='firebase')&&
+   (!query||text([row.title,row.kind,row.storagePath,row.originalName].join(' ')).includes(query)));
+  filtered.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||a.title.localeCompare(b.title,'ko'));
+  const pageSize=24,pages=Math.max(1,Math.ceil(filtered.length/pageSize));
+  return kitJson({images:filtered.slice((page-1)*pageSize,page*pageSize),page:Math.min(page,pages),
+   nextCursor:page<pages?String(page+1):'',pages,total:filtered.length,allTotal:rows.length,
+   totalBytes:rows.reduce((n,x)=>n+x.bytes,0),warnings,source:'firebase-storage',firebase:true,
+   counts:{shared:rows.filter(x=>x.source==='firebase').length,kit:rows.filter(x=>x.source==='kit-sample').length,
+     site:rows.filter(x=>x.source==='site-asset').length,
+     patterns:rows.filter(x=>x.source==='firebase-public').length}});
+ }catch(e){return kitJson({error:String(e.message||e)},Number.isInteger(e.status)?e.status:502);}
 }

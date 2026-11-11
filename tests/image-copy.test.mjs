@@ -45,8 +45,11 @@ test('administrator migration is opt-in, copy-only and route-specific',()=>{
   assert.ok(client.includes('1장 시험 복사'));
   assert.ok(client.includes('failed'));
   assert.ok(!client.includes('method:\'DELETE\''));
-  assert.ok(navigation.includes("section==='image-copy'"));
-  assert.ok(sections.includes("['image-copy','이미지 복사'"));
+  // The temporary migration sidebar was removed after copying; the upload API remains active.
+  assert.ok(!navigation.includes("section==='image-copy'"));
+  assert.ok(!sections.includes("['image-copy','이미지 복사'"));
+  const production = readFileSync(new URL('../public/promotions-client.js', import.meta.url), 'utf8');
+  assert.ok(production.includes("fetch('/api/image-copy'"));
 });
 test('Firebase rules preserve existing user paths and restrict new shared image writes',()=>{
   const storage=readFileSync(new URL('../storage.rules',import.meta.url),'utf8');

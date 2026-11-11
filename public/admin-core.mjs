@@ -3,6 +3,3 @@ export function maskEmail(email=''){const [name,domain]=email.split('@');return 
 export const adminSections=[['dashboard','운영 대시보드','overview','운영'],['members','회원 관리','users','운영'],['settings','사이트 설정','settings','운영'],['kits','키트 관리','kit','상품·콘텐츠'],['patterns','도안 관리','pattern','상품·콘텐츠'],['notifications','알림·공지','users','운영'],['support','문의·신고','support','운영'],['creators','작가·대표 도안','users','상품·콘텐츠'],['promotions','프로모션','promotion','상품·콘텐츠'],['ai','AI 기능 관리','ai','상품·콘텐츠'],['tester-calls','테스터콜·실 지원','tester','상품·콘텐츠'],['images','이미지 관리','image','상품·콘텐츠'],['sales','판매 관리','sales','판매·정산'],['settlements','정산 관리','settlements','판매·정산']];
 
 adminSections.push(['pattern-display','도안 추천·베스트 관리','추천 노출 설정','상품·콘텐츠']);
-adminSections.push(['image-copy','이미지 복사','D1 → Firebase','상품·콘텐츠']);
-adminSections.push(['kit-sample-copy','KIT 샘플 이전','KIT 이미지 → Firebase','상품·콘텐츠']);
-adminSections.push(['site-asset-copy','사이트 이미지 이전','정적 이미지 → Firebase','상품·콘텐츠']);
