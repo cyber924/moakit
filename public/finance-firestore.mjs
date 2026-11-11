@@ -1,5 +1,6 @@
 import {encodeFields,decodeDocument} from './member-core.mjs';
 import {revenue7030,normalizedTestSale,reconcileTestFinance} from './finance-reconciliation-core.mjs';
+import {orderFromLegacyPatternPurchase,orderFromVerifiedPatternSale,orderFromLegacyKit} from './order-migration-core.mjs';
 
 const PROJECT='studio-1613487721-b043c';
 const ROOT='https://firestore.googleapis.com/v1/projects/'+PROJECT+'/databases/(default)/documents';
@@ -283,31 +284,80 @@ export async function importLegacySales(rows){
  }
  return {created,skipped,failed};
 }
-export async function importLegacyKitOrders(rows){
- await authToken();
- if(!Array.isArray(rows)||rows.length>1000)throw Error('KIT 주문을 1000건씩 가져와주세요.');
- let created=0,skipped=0,failed=0;
- for(const row of rows){
+// Firestore security rules already permit administrator CREATE in moakitOrders;
+// this migration never changes/overwrites a confirmed sale or old order.
+async function createCheckedOrder(row){
+ const path=urlFor(COLLECTIONS.orders,row.id);
+ // Read-first prevents needless failed writes when a second migration is run.
+ let current=await firestore(path,{missing:true}),created=false;
+ if(!current){
   try{
-   if(typeof row.id!=='string'||!ID.test(row.id)||!ID.test(row.buyerUid))throw Error('KIT 식별자 오류');
-   const id='kit_'+row.id,total=int(row.total,0,100000000);
-   if(!Number.isFinite(total))throw Error('주문금액 오류');
-   const data={
-    id,kind:'kit',buyerUid:row.buyerUid,sourceOrderId:row.id,
-    productId:clean(row.items?.[0]?.id||'kit',150),
-    sellerUid:'__platform__',sellerName:'모아키트',
-    title:clean((row.items||[]).map(x=>x.title).join(' + '),150),
-    amount:total,quantity:Math.min(200,(row.items||[]).reduce((n,x)=>n+Number(x.quantity||0),0)),
-    charged:0,mode:'test',status:'recorded',verification:'pending',
-    createdAt:clean(row.createdAt,40),detail:JSON.stringify((row.items||[]).map(x=>({id:x.id,quantity:x.quantity,subtotal:x.subtotal}))).slice(0,12000),
-    source:'work-admin-import'
-   };
-   const result=await createImmutable(COLLECTIONS.orders,id,data);
-   if(result.created)created++;else skipped++;
-  }catch{failed++;}
+   await firestore(path+'?currentDocument.exists=false',{method:'PATCH',body:{fields:encodeFields(row)}});
+   created=true;
+  }catch(e){
+   if(!isDuplicate(e))throw e;
+  }
+  current=await firestore(path);
  }
- return {created,skipped,failed};
+ const saved=decodeDocument(current);
+ if(saved.id!==row.id||saved.kind!==row.kind||saved.buyerUid!==row.buyerUid
+   ||saved.productId!==row.productId||saved.amount!==row.amount
+   ||saved.mode!=='test'||saved.charged!==0){
+   throw Error('기존 주문과 구매자·상품·금액이 달라 덮어쓰지 않았습니다.');
+ }
+ return {created,orderId:row.id};
 }
+async function importOrderRows(rows,converter){
+ await authToken();
+ if(!Array.isArray(rows)||rows.length>1000)throw Error('주문 이전은 1000건 이하씩 진행해주세요.');
+ const result={created:0,skipped:0,failed:0,examples:[]};
+ for(const source of rows){
+  try{
+   const row=converter(source);
+   const saved=await createCheckedOrder(row);
+   result[saved.created?'created':'skipped']++;
+  }catch(e){
+   result.failed++;
+   if(result.examples.length<3)result.examples.push(String(e.message||e).slice(0,150));
+  }
+ }
+ return result;
+}
+export async function importLegacyKitOrders(rows){
+ return importOrderRows(rows,orderFromLegacyKit);
+}
+export async function importLegacyPatternOrders(entries){
+ return importOrderRows(entries,entry=>orderFromLegacyPatternPurchase(entry.purchase,entry.uid));
+}
+export async function importOrdersFromVerifiedSales(sales){
+ // KIT sales in D1 are LINE ITEMS, not orders. Their authoritative
+ // source is kit_orders, and each KIT ORDER must be imported only once.
+ return importOrderRows(sales.filter(s=>s.kind==='pattern'&&s.mode==='test'),orderFromVerifiedPatternSale);
+}
+export async function listLegacyPurchasePage(pageToken=''){
+ await authToken();
+ const url=new URL(ROOT+'/users');
+ url.searchParams.set('pageSize','100');
+ if(pageToken)url.searchParams.set('pageToken',pageToken);
+ const listing=await firestore(url.toString());
+ const entries=[],stats={users:0,purchases:0,invalid:0};
+ for(const doc of listing.documents||[]){
+  stats.users++;
+  const uid=String(doc.name||'').split('/').pop();
+  const value=decodeDocument(doc).moakitPurchases;
+  if(!value)continue;
+  let purchases;
+  try{purchases=JSON.parse(value);}catch{stats.invalid++;continue;}
+  if(!purchases||typeof purchases!=='object'||Array.isArray(purchases)){stats.invalid++;continue;}
+  for(const purchase of Object.values(purchases)){
+   if(purchase?.mode==='test'&&purchase?.status==='test_completed'){
+    entries.push({uid,purchase});stats.purchases++;
+   }
+  }
+ }
+ return {entries,stats,nextPageToken:String(listing.nextPageToken||'')};
+}
+
 // Existing Work settlement batches are imported as historical records only;
 // their paid/confirmed labels are preserved as source metadata, not new payments.
 export async function importLegacySettlements(batches){

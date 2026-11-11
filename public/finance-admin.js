@@ -1,6 +1,6 @@
 import {mountKitOrders} from './kit-orders.js';
 import {csvText} from './finance-export.mjs';
-import {mountFirebaseFinanceAdmin} from './finance-firestore-admin.js';
+import {mountFirebaseFinanceAdmin} from './finance-firestore-admin.js?v=orders-migration-1';
 const E=s=>window.MoaUI.escapeHtml(String(s??'')),money=n=>n==null?'미설정':Number(n).toLocaleString('ko-KR')+'원';
 const date=v=>new Date(v).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}),today=()=>new Date(Date.now()+9*3600000).toISOString().slice(0,10);
 const status={review:'검토 중',confirmed:'확정',paid:'지급 완료',void:'검토 취소'},kindName=k=>k==='kit'?'KIT':'도안';
