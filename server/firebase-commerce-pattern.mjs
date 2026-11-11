@@ -73,8 +73,10 @@ async function library(uid){
  const orders=await query('moakitOrders','buyerUid',uid),sales=await query('moakitSales','buyerUid',uid);
  const byId=new Map();
  for(const o of orders){
-  if(o.kind!=='pattern'||o.mode!=='test'||o.charged!==0)continue;
+  if(o.kind!=='pattern'||o.mode!=='test'||o.charged!==0||o.status==='cancelled')continue;
   if(o.verification!=='verified'&& !sales.some(s=>confirmedSale(s,uid,o.productId)))continue;
+  if(sales.some(s=>s.kind==='pattern'&&s.productId===o.productId&&s.buyerUid===uid
+    &&(s.status==='cancelled'||s.status==='void'||(Number(s.amount)>0&&Number(s.refund)>=Number(s.amount)))))continue;
   byId.set(o.productId,{...resultPurchase(o),source:o.source});
  }
  for(const s of sales){
@@ -162,7 +164,8 @@ async function refundPattern(user,id,reason){
   const docs=await batchGet([name('moakitOrders',idOrder),name('moakitSales',idOrder)],tx);
   const order=docs.get(name('moakitOrders',idOrder)),sale=docs.get(name('moakitSales',idOrder));
   if(!order||!sale||order.source!=='firebase-checkout')throw fail('Firebase 신규 주문만 취소할 수 있습니다.',409);
-  const linked=await query('moakitSettlements','sellerUid',sale.sellerUid);
+  const linked=await query('moakitSettlements','sellerUid',sale.sellerUid,1001,tx);
+  if(linked.length>=1000)throw fail('정산 기록이 많아 취소를 보류했습니다. 관리자 대조가 필요합니다.',409);
   if(linked.some(x=>String(x.saleIds||'').split(',').includes(idOrder)))
    throw fail('이미 정산 검토서에 포함된 거래입니다. 관리자 정산 대조 후 취소해주세요.',409);
   if(order.status==='cancelled'){await rollback(tx);return json({cancelled:true,already:true});}
