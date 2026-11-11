@@ -4,7 +4,7 @@ import {encodeFields,decodeDocument} from './member-core.mjs';
 // no new rules, secrets or Work service changes are needed.
 const ROOT='https://firestore.googleapis.com/v1/projects/studio-1613487721-b043c/databases/(default)/documents';
 const DOC_ID='moakitPatternManagementVisibility';
-const URL=ROOT+'/users/'+DOC_ID;
+const DOC_URL=ROOT+'/users/'+DOC_ID;
 const VALID=/^[A-Za-z0-9_-]{1,260}$/;
 const request=async(user,url,method='GET',body)=>{
  if(!user?.getIdToken)throw Error('관리자 로그인이 필요합니다.');
@@ -24,7 +24,7 @@ const decodeIds=v=>{
  return new Set(Array.isArray(a)?a.filter(x=>typeof x==='string'&&VALID.test(x)).slice(0,800):[]);
 };
 export async function readHiddenPatterns(user){
- const raw=await request(user,URL),data=raw?decodeDocument(raw):{};
+ const raw=await request(user,DOC_URL),data=raw?decodeDocument(raw):{};
  return {ids:decodeIds(data.hiddenPatternIds),updateTime:raw?.updateTime||null};
 }
 export async function hidePatternInAdmin(user,id){
@@ -35,7 +35,7 @@ export async function hidePatternInAdmin(user,id){
   original.ids.add(id);
   if(original.ids.size>800)throw Error('숨김 도안이 많아 관리자 점검이 필요합니다.');
   const values={id:DOC_ID,hiddenPatternIds:JSON.stringify([...original.ids].sort()),updatedAt:new Date().toISOString()};
-  const u=new URL(URL);
+  const u=new URL(DOC_URL);
   if(original.updateTime){
    u.searchParams.append('updateMask.fieldPaths','hiddenPatternIds');
    u.searchParams.append('updateMask.fieldPaths','updatedAt');
