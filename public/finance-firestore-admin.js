@@ -1,0 +1,117 @@
+import {
+ testOrders,confirmedSales,settlementRecords,confirmTestSale,
+ createTestSettlement,importLegacySales,importLegacyKitOrders,importLegacySettlements
+} from './finance-firestore.mjs';
+
+const E=s=>String(s??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
+const W=n=>Number(n||0).toLocaleString('ko-KR')+'원';
+const date=s=>s?new Date(s).toLocaleDateString('ko-KR'):'—';
+
+// Embedded in the existing administrator finance screens. No new Vercel auth
+// endpoint is created. Firebase Auth + Firestore rules authorize each action.
+export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={}){
+ const adminUid=window.MoaAccount?.user?.uid;
+ const live=()=>target.isConnected&&window.MoaAccount?.user?.uid===adminUid;
+ let busy=false,orders=[],sales=[],settlements=[];
+ const note=s=>{const slot=target.querySelector('[data-firebase-note]');if(slot)slot.textContent=s};
+ async function load(){
+  if(!live())return;
+  target.innerHTML='<section class="admin-card"><h2>Firebase 판매·정산 통합</h2><p class="admin-notice">기존 Work/D1 기록은 유지됩니다. 구매자가 만든 테스트 주문은 검증 전이며, 확정 매출·실제 지급이 아닙니다.</p><p role="status">Firebase DB에서 자료를 확인하는 중입니다…</p></section>';
+  try{
+   [orders,sales,settlements]=await Promise.all([
+     testOrders({role:'admin'}),confirmedSales({role:'admin'}),settlementRecords({role:'admin'})
+   ]);
+   if(!live())return;
+   draw();
+  }catch(e){
+   if(!live())return;
+   target.innerHTML='<section class="admin-card"><h2>Firebase DB 연결 확인</h2><p class="admin-notice error" role="alert">'+E(e.message)+'</p><p>Firestore 규칙에 moakitOrders, moakitSales, moakitSettlements 3개 컬렉션을 게시해야 합니다. 기존 판매·정산 기능은 계속 이용할 수 있습니다.</p><button type="button" class="admin-button" data-firebase-retry>다시 조회</button></section>';
+   target.querySelector('[data-firebase-retry]').onclick=load;
+  }
+ }
+ function draw(){
+  if(!live())return;
+  const claimed=new Set(settlements.flatMap(b=>String(b.saleIds||'').split(',').filter(Boolean)));
+  const usable=sales.filter(x=>x.mode==='test'&&x.status==='reviewed'&&!claimed.has(x._docId||x.orderId)&&x.sellerUid&&x.sellerUid!=='__platform__');
+  const grouped=Object.create(null);for(const item of usable)(grouped[item.sellerUid]??=[]).push(item);
+  target.innerHTML='<section class="admin-card"><h2>Firebase 테스트 거래 통합</h2><p class="admin-notice">실제 결제·송금이 없습니다. 구매 원본과 검증하기 전에는 판매금액에 포함하지 않습니다.</p>'+
+   '<div class="admin-stat-grid">'+[
+    ['기록된 주문',orders.length+'건'],['검증된 테스트 판매',sales.length+'건'],
+    ['테스트 정산서',settlements.length+'건'],['테스트 판매 기록액',W(sales.reduce((n,s)=>n+Number(s.amount||0),0))]
+   ].map(([a,b])=>'<div class="admin-stat"><span>'+E(a)+'</span><strong>'+E(b)+'</strong></div>').join('')+'</div>'+
+   '<div class="image-copy-actions"><button type="button" class="admin-button" data-fin-db-action="refresh">Firebase 새로고침</button>'+
+   '<button type="button" class="admin-button" data-fin-db-action="sales">기존 D1 판매 내역 가져오기 (현재 조회 기간)</button>'+
+   '<button type="button" class="admin-button" data-fin-db-action="kits">기존 KIT 주문 가져오기</button>'+
+   '<button type="button" class="admin-button" data-fin-db-action="batches">기존 D1 정산서 가져오기</button></div>'+
+   '<p role="status" class="admin-notice" data-firebase-note>기존 기록을 가져와도 원본 D1 데이터는 삭제되지 않습니다.</p>'+
+   '<h3>구매 기록 · 미검증 테스트 원장</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>상품</th><th>구매자</th><th>표시금액</th><th>상태</th><th>작업</th></tr></thead><tbody>'+
+   orders.slice(0,100).map(o=>'<tr><td>'+E(o.title)+'<small>'+E(o.kind==='kit'?'KIT':'도안')+' · '+E(o.sourceOrderId)+'</small></td><td>'+E(o.buyerUid)+'</td><td>'+W(o.amount)+'</td><td>검증 전 · 실제 청구 0원</td><td><button type="button" class="admin-button" data-verify-order="'+E(o.id)+'" '+(sales.some(s=>s.orderId===o.id||s.sourceOrderId===o.sourceOrderId)?'disabled':'')+'>원본 대조</button></td></tr>').join('')+
+   (orders.length?'':'<tr><td colspan="5">아직 Firebase로 복사한 구매 기록이 없습니다.</td></tr>')+
+   '</tbody></table></div><h3>검증·이전된 테스트 판매</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>작가</th><th>상품</th><th>표시금액</th><th>작가 몫</th><th>상태</th></tr></thead><tbody>'+
+   sales.slice(0,100).map(s=>'<tr><td>'+E(s.sellerName||s.sellerUid)+'</td><td>'+E(s.title)+'</td><td>'+W(s.amount)+'</td><td>'+W(s.sellerShare)+'</td><td>'+E(s.status==='settled-in-work'?'기존 정산 포함':s.status)+'</td></tr>').join('')+
+   (sales.length?'':'<tr><td colspan="5">아직 검증된 판매가 없습니다.</td></tr>')+
+   '</tbody></table></div>'+
+   '<h3>정산 검토 (테스트 전용)</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>작가</th><th>미정산 건</th><th>테스트 지급 예정액</th><th>작업</th></tr></thead><tbody>'+
+   Object.entries(grouped).map(([uid,rows])=>'<tr><td>'+E(rows[0].sellerName||uid)+'</td><td>'+rows.length+'건</td><td>'+W(rows.reduce((n,s)=>n+Number(s.sellerShare||0),0))+'</td><td><button type="button" class="admin-button" data-create-settlement="'+E(uid)+'">테스트 정산 검토서 생성</button></td></tr>').join('')+
+   (Object.keys(grouped).length?'':'<tr><td colspan="4">정산 검토 대상이 없습니다.</td></tr>')+
+   '</tbody></table></div><h3>Firebase 정산서 '+settlements.length+'건</h3><p class="admin-notice">정산서는 테스트 검토 기록이며 실제 지급 기능은 없습니다. 기존 Work 확정·지급 기록도 변경하지 않습니다.</p>'+
+   settlements.slice(0,30).map(b=>'<p>'+E(b.sellerName||b.sellerUid)+' · '+W(b.payout)+' · '+E(b.source==='legacy-d1'?'기존 D1 복사':'테스트 검토')+'</p>').join('')+
+   '</section>';
+  target.querySelectorAll('[data-verify-order]').forEach(b=>b.onclick=()=>run(async()=>{
+   const order=orders.find(x=>x.id===b.dataset.verifyOrder);
+   if(!order)throw Error('구매 기록을 찾지 못했습니다.');
+   await confirmTestSale(order);
+   return '기존 구매 원본 대조 및 Firebase 판매 기록 완료';
+  }));
+  target.querySelectorAll('[data-create-settlement]').forEach(b=>b.onclick=()=>run(async()=>{
+   const uid=b.dataset.createSettlement,rows=grouped[uid]||[];
+   if(!rows.length)throw Error('검토할 판매가 없습니다.');
+   const sorted=rows.map(x=>x.createdAt).sort();
+   await createTestSettlement({
+    sellerUid:uid,sellerName:rows[0].sellerName||'작가',
+    from:sorted[0]?.slice(0,10)||new Date().toISOString().slice(0,10),
+    to:sorted.at(-1)?.slice(0,10)||new Date().toISOString().slice(0,10),
+    sales:rows
+   });
+   return 'Firebase 테스트 정산서 생성 완료 (송금 없음)';
+  }));
+  target.querySelectorAll('[data-fin-db-action]').forEach(b=>b.onclick=()=>run(async()=>{
+   const action=b.dataset.finDbAction;
+   if(action==='refresh')return '자료를 다시 불러왔습니다.';
+   if(action==='sales'){
+    const d=await legacyApi('exportSales',{...(criteria?criteria():{}),mode:'test',page:1});
+    const result=await importLegacySales(d.sales||[]);
+    return '기존 D1 판매 이전: '+result.created+'건 저장, '+result.skipped+'건 중복, '+result.failed+'건 실패';
+   }
+   if(action==='batches'){
+    const d=await legacyApi('settlements',{...(criteria?criteria():{}),mode:'test',page:1});
+    const result=await importLegacySettlements(d.batches||[]);
+    return '기존 D1 정산서 이전: '+result.created+'건 저장, '+result.skipped+'건 중복, '+result.failed+'건 실패';
+   }
+   if(action==='kits'){
+    let cursor='',created=0,skipped=0,failed=0,scanned=0;
+    const user=window.MoaAccount?.user;if(!user)throw Error('로그인이 필요합니다.');
+    for(let n=0;n<100;n++){
+     note('이전 중 · KIT 주문 '+scanned+'건 확인');
+     const url='/api/kits/orders?'+new URLSearchParams({admin:'1',...(cursor?{cursor}:{})});
+     const r=await fetch(url,{headers:{Authorization:'Bearer '+await user.getIdToken()},signal:AbortSignal.timeout(35000)});
+     const data=await r.json().catch(()=>({}));
+     if(!r.ok)throw Error('KIT 이전 조회 ('+r.status+'): '+(data.error||''));
+     const batch=data.orders||[];
+     const x=await importLegacyKitOrders(batch);created+=x.created;skipped+=x.skipped;failed+=x.failed;scanned+=batch.length;
+     if(!data.nextCursor)break;cursor=data.nextCursor;
+    }
+    return '기존 KIT 주문: '+created+'건 저장, '+skipped+'건 중복, '+failed+'건 실패';
+   }
+   return '';
+  }));
+ }
+ async function run(action){
+  if(busy)return;busy=true;
+  target.querySelectorAll('button').forEach(b=>b.disabled=true);
+  try{note('Firebase 자료를 처리하고 있습니다…');const result=await action();if(live()){await load();note(result);}}
+  catch(e){if(live()){target.querySelectorAll('button').forEach(b=>b.disabled=false);note(String(e.message||e));}}
+  finally{busy=false;}
+ }
+ await load();
+}

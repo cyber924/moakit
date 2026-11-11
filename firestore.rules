@@ -409,6 +409,78 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Test-only Firebase order mirror. A buyer may create their own pending
+    // receipt, but NEVER edit it or turn it into a verified sale or settlement.
+    match /moakitOrders/{orderId} {
+      function validPending() {
+        let d = request.resource.data;
+        return d.keys().hasAll([
+          'id','kind','buyerUid','sourceOrderId','productId','sellerUid',
+          'sellerName','title','amount','quantity','charged','mode',
+          'status','verification','createdAt','detail','source'
+        ])
+        && d.keys().hasOnly([
+          'id','kind','buyerUid','sourceOrderId','productId','sellerUid',
+          'sellerName','title','amount','quantity','charged','mode',
+          'status','verification','createdAt','detail','source'
+        ])
+        && d.id == orderId
+        && d.kind in ['pattern','kit']
+        && d.buyerUid is string && d.buyerUid.size() <= 128
+        && d.sourceOrderId is string && d.sourceOrderId.size() <= 450
+        && d.productId is string && d.productId.size() <= 150
+        && d.sellerUid is string && d.sellerUid.size() <= 128
+        && d.sellerName is string && d.sellerName.size() <= 80
+        && d.title is string && d.title.size() <= 150
+        && d.amount is int && d.amount >= 0 && d.amount <= 100000000
+        && d.quantity is int && d.quantity >= 1 && d.quantity <= 200
+        && d.charged == 0 && d.mode == 'test'
+        && d.status == 'recorded' && d.verification == 'pending'
+        && d.createdAt is string && d.createdAt.size() <= 40
+        && d.detail is string && d.detail.size() <= 12000
+        && d.source is string && d.source.size() <= 30;
+      }
+      allow get, list: if admin() || owner(resource.data.buyerUid);
+      allow create: if validPending() && (admin() || owner(request.resource.data.buyerUid));
+      allow update, delete: if false;
+    }
+    // Only an administrator can create a reviewed test-sales snapshot.
+    // Sales are never accepted from a buyer's unverified receipt alone.
+    match /moakitSales/{saleId} {
+      allow get, list: if admin() || (signedIn()
+        && resource.data.sellerUid == request.auth.uid);
+      allow create: if admin()
+        && request.resource.data.keys().hasAll([
+          'orderId','sellerUid','amount','sellerShare',
+          'platformShare','mode','charged','status','createdAt'
+        ])
+        && request.resource.data.mode == 'test'
+        && request.resource.data.charged == 0
+        && request.resource.data.status in ['reviewed','settled-in-work']
+        && request.resource.data.amount is int
+        && request.resource.data.amount >= 0
+        && request.resource.data.amount <= 100000000
+        && request.resource.data.sellerShare is int
+        && request.resource.data.platformShare is int
+        && request.resource.data.sellerShare >= 0
+        && request.resource.data.platformShare >= 0
+        && request.resource.data.sellerUid is string;
+      allow update, delete: if false;
+    }
+    // Settlements in this migration are DRAFT/TEST records only, not payouts.
+    match /moakitSettlements/{settlementId} {
+      allow get, list: if admin() || (signedIn()
+        && resource.data.sellerUid == request.auth.uid);
+      allow create: if admin()
+        && request.resource.data.mode == 'test'
+        && request.resource.data.status == 'review'
+        && request.resource.data.paid == 0
+        && request.resource.data.sellerUid is string
+        && request.resource.data.payout is int
+        && request.resource.data.payout >= 0;
+      allow update, delete: if false;
+    }
+
     match /{document=**} { allow read, write: if false; }
   }
 }
