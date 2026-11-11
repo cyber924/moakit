@@ -78,3 +78,6 @@ MOAKIT_FIREBASE_COMMERCE_MODE = legacy  (처음에는 반드시 비활성)
 - `tests/firebase-commerce-cutover.test.mjs`
 
 **이번 소스 배포만으로 Firebase 주문/재고 독립화가 활성화되지는 않습니다. 민감정보를 운영 환경에 설정하고 별도 검증한 뒤 전환하세요.**
+
+## 과거 KIT 주문 관리 보호
+Firebase 운영 모드를 활성화하더라도 기존 Work/D1 주문의 배송정보·배송 수정 권한을 잃지 않도록 관리자/구매자 **KIT 주문 내역 → 기존 Work 주문 관리** 전환 버튼을 추가했습니다. 이 버튼은 과거 Work 주문을 해당 서버에서 확인·관리할 수 있게 하며, 새 Firebase 주문 재고를 D1으로 되돌리지 않습니다. Work 서버를 완전히 종료하기 전에 과거 주문의 배송 마무리 및 개인정보 별도 이전이 필요합니다.
