@@ -4,12 +4,14 @@ service firebase.storage {
     function signedIn() { return request.auth != null; }
     function owner(uid) { return signedIn() && request.auth.uid == uid; }
     // Administrator: designated Firebase Authentication email.
+    // No Firestore lookup: prevents cross-service IAM permissions.
+    // The primary administrator is authenticated by Firebase Authentication email.
+    // Other administrators may use an explicitly issued Firebase Auth custom claim.
     function admin() {
-      return signedIn() && (request.auth.token.get('email', '') == 'cyber924@naver.com'
-        || (firestore.exists(/databases/(default)/documents/moakitAdmins/$(request.auth.uid))
-          ? (firestore.get(/databases/(default)/documents/moakitAdmins/$(request.auth.uid)).data.active == true
-            && firestore.get(/databases/(default)/documents/moakitAdmins/$(request.auth.uid)).data.email == request.auth.token.get('email', ''))
-          : request.auth.token.get('email', '') in ['moadmin1@naver.com', 'moadmin2@naver.com']));
+      return signedIn() && (
+        request.auth.token.get('email', '') == 'cyber924@naver.com'
+        || request.auth.token.get('moakitStorageAdmin', false) == true
+      );
     }
     function validSize() { return request.resource.size > 0 && request.resource.size <= 10 * 1024 * 1024; }
     match /moakit/public/{uid}/{workId}/{fileName} {
