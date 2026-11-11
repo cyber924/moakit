@@ -5,3 +5,4 @@ export const adminSections=[['dashboard','운영 대시보드','overview','운�
 adminSections.push(['pattern-display','도안 추천·베스트 관리','추천 노출 설정','상품·콘텐츠']);
 adminSections.push(['image-copy','이미지 복사','D1 → Firebase','상품·콘텐츠']);
 adminSections.push(['kit-sample-copy','KIT 샘플 이전','KIT 이미지 → Firebase','상품·콘텐츠']);
+adminSections.push(['site-asset-copy','사이트 이미지 이전','정적 이미지 → Firebase','상품·콘텐츠']);

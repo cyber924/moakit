@@ -18,7 +18,7 @@ export function backendRoute(request) {
   if ((origin && origin !== url.origin) || request.headers.get('sec-fetch-site') === 'cross-site') {
     return { status: 403, error: '다른 사이트의 요청은 허용하지 않습니다.' };
   }
-  if (url.pathname === '/api/seller/extract' || url.pathname === '/api/image-copy' || url.pathname === '/api/image-assets' || url.pathname === '/api/kit-sample' || url.pathname === '/api/kit-sample-copy') return { local: true };
+  if (url.pathname === '/api/seller/extract' || url.pathname === '/api/image-copy' || url.pathname === '/api/image-assets' || url.pathname === '/api/kit-sample' || url.pathname === '/api/kit-sample-copy' || url.pathname === '/api/site-asset' || url.pathname === '/api/site-asset-copy') return { local: true };
   if (url.pathname === '/api/promotions' && request.method === 'GET' && url.searchParams.has('image')) return { local: true };
   if (!SHARED_API_PATHS.has(url.pathname)) return { status: 404, error: '요청한 기능을 찾을 수 없습니다.' };
   if (!['GET', 'HEAD', 'POST'].includes(request.method)) return { status: 405, error: '지원하지 않는 요청입니다.' };

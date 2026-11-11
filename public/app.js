@@ -13,7 +13,7 @@ const individualPhotos=[
 {file:'best-fairisle.png',alt:'블루와 크림 배색의 그레이데이 페어아일 풀오버'},
 {file:'best-knit-top.png',alt:'아이보리 봄빛 포인텔 니트탑 착용 예시'}
 ];
-function photo(n){const work=works.find(w=>w.tile===n);const p=work?.image?{file:work.image,alt:work.name+' 작품 예시'}:individualPhotos[n];return p?`<img class="individual-photo" src="/assets/${p.file}" alt="${p.alt}" loading="lazy" decoding="async">`:`<span class="tile-photo" style="${tileStyle(n)}"></span>`;}
+function photo(n){const work=works.find(w=>w.tile===n);const p=work?.image?{file:work.image,alt:work.name+' 작품 예시'}:individualPhotos[n];return p?`<img class="individual-photo" src="/api/site-asset?file=${encodeURIComponent(p.file)}" alt="${p.alt}" loading="lazy" decoding="async">`:`<span class="tile-photo" style="${tileStyle(n)}"></span>`;}
 function product(w,small=false){return `<article class="product ${small?'small':''}" data-id="${w.id}"><button class="product-image" data-work="${w.id}" aria-label="${w.name} 살펴보기">${photo(w.tile)}${small?'':`<span class="product-tag">${w.tag}</span>`}</button><div class="product-info"><button class="product-name" data-work="${w.id}">${w.name}</button><div class="maker">by ${w.maker}</div><div class="product-price">${money(w.price)}${small?'':`<span>LEVEL ${w.levelNumber} · PDF 도안</span>`}</div></div><button class="heart ${favorites.has(w.id)?'saved':''}" data-heart="${w.id}" aria-label="${w.name} 찜하기" aria-pressed="${favorites.has(w.id)}">${icon('heart')}</button></article>`;}
 function renderBest(){const list=works.filter(w=>currentFilter==='all'||w.type===currentFilter);$('#best-grid').innerHTML=list.slice(0,bestExpanded?8:4).map(w=>product(w)).join('');}
 $('#best-grid').innerHTML='<p>추천 작품을 불러오고 있어요.</p>';
@@ -23,7 +23,7 @@ function yarn(k){return `<div class="yarn-photo" style="--yarn:${k.color}"><span
 $('#kit-grid').innerHTML='<p class="kit-muted">KIT를 불러오고 있어요.</p>';
 const tests=[{name:'스프링 가디건 테스트',tile:4,maker:'mood_knits',date:'10.19 – 11.02',days:3},{name:'케이블 숄 테스트',tile:5,maker:'haneulknit',date:'10.20 – 11.05',days:4},{name:'스노우페어 스웨터 테스트',tile:6,maker:'dailyyarn',date:'10.21 – 11.10',days:5},{name:'허니 가디건 테스트',tile:7,maker:'slowknit',date:'10.22 – 11.08',days:6}];
 $('#tester-grid').innerHTML=tests.map((t,i)=>`<article><button class="tester-image" data-test="${i}" aria-label="${t.name} 모집 살펴보기">${photo(t.tile)}<span class="status-chip">모집중</span></button><div class="tester-info"><div><h3><button data-test="${i}" style="padding:0">${t.name}</button></h3><p>${t.date} · 예시 일정</p></div><span class="days-left">D-${t.days}</span></div></article>`).join('');
-function designerCard(d){return `<button class="designer" data-designer="${d.name}"><img class="portrait" src="/assets/${d.image}" alt="${d.korean} 작가 프로필 예시" loading="lazy"><b>${d.name}</b><span>${d.korean}의 뜨개 이야기</span></button>`;}
+function designerCard(d){return `<button class="designer" data-designer="${d.name}"><img class="portrait" src="/api/site-asset?file=${encodeURIComponent(d.image)}" alt="${d.korean} 작가 프로필 예시" loading="lazy"><b>${d.name}</b><span>${d.korean}의 뜨개 이야기</span></button>`;}
 $('#designer-grid').innerHTML=designers.map(designerCard).join('');
 const modal=$('#modal');let returnFocus=null;
 function openModal(html){returnFocus=document.activeElement;$('#modal-content').innerHTML=html;if(!modal.open)modal.showModal();}
