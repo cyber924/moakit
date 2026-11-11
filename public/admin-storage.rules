@@ -26,6 +26,22 @@ service firebase.storage {
         && fileName.matches('.*[.][pP][dD][fF]');
       allow delete: if owner(uid) || admin();
     }
+    // Public copies of existing D1 images, creatable only by an administrator.
+    match /moakit/images/shared/{fileName} {
+      allow get: if true;
+      allow list: if admin();
+      allow create: if admin()
+        && fileName.matches('[A-Za-z0-9_-]{1,160}[.](webp|jpg|png)')
+        && request.resource.size > 0
+        && request.resource.size < 200000
+        && (
+          (fileName.matches('.*[.]webp') && request.resource.contentType == 'image/webp')
+          || (fileName.matches('.*[.]jpg') && request.resource.contentType == 'image/jpeg')
+          || (fileName.matches('.*[.]png') && request.resource.contentType == 'image/png')
+        );
+      allow update, delete: if false;
+    }
+
     match /{allPaths=**} { allow read, write: if false; }
   }
 }

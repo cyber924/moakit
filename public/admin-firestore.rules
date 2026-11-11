@@ -369,6 +369,46 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time;
       allow update, delete: if false;
     }
+    // Shared public image copies migrated from the D1 image library.
+    match /moakitImages/{imageId} {
+      allow get, list: if true;
+      allow create: if admin()
+        && imageId.matches('[A-Za-z0-9_-]{1,160}')
+        && request.resource.data.keys().hasAll([
+          'sourceId','title','storagePath','mimeType','byteSize','sha256',
+          'originalCreatedAt','copiedAt','source','status'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'sourceId','title','storagePath','mimeType','byteSize','sha256',
+          'originalCreatedAt','copiedAt','source','status'
+        ])
+        && request.resource.data.sourceId == imageId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 150
+        && request.resource.data.storagePath is string
+        && request.resource.data.storagePath.matches(
+          'moakit/images/shared/' + imageId + '[.](webp|jpg|png)'
+        )
+        && request.resource.data.mimeType in ['image/webp','image/jpeg','image/png']
+        && (
+          (request.resource.data.mimeType == 'image/webp' && request.resource.data.storagePath.matches('.*[.]webp'))
+          || (request.resource.data.mimeType == 'image/jpeg' && request.resource.data.storagePath.matches('.*[.]jpg'))
+          || (request.resource.data.mimeType == 'image/png' && request.resource.data.storagePath.matches('.*[.]png'))
+        )
+        && request.resource.data.byteSize is int
+        && request.resource.data.byteSize > 0
+        && request.resource.data.byteSize < 200000
+        && request.resource.data.sha256 is string
+        && request.resource.data.sha256.matches('[a-f0-9]{64}')
+        && request.resource.data.originalCreatedAt is string
+        && request.resource.data.originalCreatedAt.size() <= 60
+        && request.resource.data.copiedAt is string
+        && request.resource.data.copiedAt.size() <= 60
+        && request.resource.data.source == 'd1-shared-banner'
+        && request.resource.data.status == 'ready';
+      allow update, delete: if false;
+    }
+
     match /{document=**} { allow read, write: if false; }
   }
 }
