@@ -1,0 +1,30 @@
+name: Firebase commerce validation
+on:
+  push:
+    branches:
+      - firebase-commerce-hardening-20261112
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: read
+jobs:
+  commerce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Validate Cloud Functions and pure transaction helpers
+        run: |
+          node --check functions/index.cjs
+          node --check functions/commerce-core.cjs
+          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs
+      - name: Install backend dependencies and verify entry point
+        run: |
+          npm --prefix functions install --ignore-scripts --no-audit --no-fund
+          node -e "require('./functions/index.cjs'); console.log('Cloud Functions entry point OK')"
