@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import * as API from '../public/tester-client.js';
+import {newCall} from '../public/tester-core.mjs';
+import {encodeFields} from '../public/member-core.mjs';
+const emulator=process.env.FIRESTORE_EMULATOR_HOST;if(!emulator)throw Error('Emulator required');
+const base=`http://${emulator}/v1/projects/demo-moakit/databases/(default)/documents`;
+const jwt=(uid,extra={})=>[Buffer.from('{"alg":"none"}').toString('base64url'),Buffer.from(JSON.stringify({iss:'https://securetoken.google.com/demo-moakit',aud:'demo-moakit',sub:uid,user_id:uid,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600,email:uid+'@example.com',firebase:{sign_in_provider:'password'},...extra})).toString('base64url'),''].join('.');
+const F=uid=>({user:{uid,getIdToken:async()=>jwt(uid)}}),author=F('tester-author-1'),buyer=F('tester-buyer-1'),second=F('tester-buyer-2'),stranger=F('tester-buyer-3'),admin={user:{uid:'tester-admin',getIdToken:async()=>jwt('tester-admin',{email:'cyber924@naver.com'})}};
+const realFetch=globalThis.fetch;let checks=0;
+const pass=label=>{checks++;console.log('PASS '+label);};
+async function seed(path,value){const r=await realFetch(base+'/'+path,{method:'PATCH',headers:{Authorization:'Bearer owner','Content-Type':'application/json'},body:JSON.stringify({fields:encodeFields(value)})});assert.equal(r.status,200);}
+globalThis.fetch=async(url,init={})=>{if(String(url).startsWith('https://firestore.googleapis.com/v1/')){const target=String(url).replace('https://firestore.googleapis.com/v1/projects/studio-1613487721-b043c/databases/(default)/documents',base);let body=init.body;if(body)body=body.replaceAll('projects/studio-1613487721-b043c/','projects/demo-moakit/');return realFetch(target,{...init,body});}return realFetch(url,init);};
+try{
+ for(const role of ['author','buyer'])for(let i=1;i<=3;i++)await seed('moakitUsers/tester-'+role+'-'+i,{accountType:role==='author'?'seller':'buyer',sellerStatus:role==='author'?'pending':'none'});
+ await seed('moakitUsers/tester-author-1/works/test-work',{sellerUid:'tester-author-1',content:'{}'});
+ const c=newCall(author.user.uid);c.workId='test-work';c.capacity=1;const day=86400000,now=Date.now();Object.assign(c,{applyStart:new Date(now-day).toISOString(),applyEnd:new Date(now+day).toISOString(),announceAt:new Date(now+2*day).toISOString(),testStart:new Date(now+3*day).toISOString(),testEnd:new Date(now+10*day).toISOString()});c.data={snapshot:{title:'샘플 테스터 도안',sourceVersion:123},conditions:['기한 내 제작'],provisions:['PDF'],message:'테스트 모집'};
+ await API.saveCall(c,author);pass('seller creates draft linked to own pattern');
+ await assert.rejects(API.call(c.id,buyer));pass('private draft hidden from applicant');
+ c.status='pending';await assert.rejects(API.saveCall(c,author));pass('submission requires prepared private PDF');
+ await API.put(`moakitTesterCalls/${c.id}/private/file`,{blob:'encrypted',createdAt:new Date().toISOString(),expiresAt:c.testEnd},author);
+ await API.saveCall(c,author);pass('author submits draft for review');
+ c.status='recruiting';await API.saveCall(c,author);pass('author publishes recruitment immediately without approval');
+ const publicRows=await API.query('moakitTesterCalls',[['status',['recruiting','closed','testing','completed']]]);assert.ok(publicRows.some(x=>x.id===c.id));pass('anonymous public call listing');
+ const profile={displayName:'샘플 지원자',knittingLevel:'intermediate',bio:''},values={motivation:'작품을 완성하고 싶어요.',consent:true};
+ await API.apply(c,buyer,profile,values);await API.apply(c,second,profile,values);pass('members apply with private profiles');
+ await assert.rejects(API.apply(c,buyer,profile,values));pass('duplicate applications rejected');
+ await assert.rejects(API.applications(c.id,stranger));pass('unrelated member cannot list applications');
+ const mine=await API.ownApplications(buyer);assert.equal(mine.filter(x=>x.callId===c.id).length,1);pass('member MY private pointer reads own application without a collection-group index');
+ await API.transition(c.id,buyer.user.uid,'selected',author);pass('selection atomically allocates a capacity slot');
+ await assert.rejects(API.transition(c.id,second.user.uid,'selected',author));assert.equal((await API.get(`moakitTesterCalls/${c.id}/applications/${second.user.uid}`,second)).status,'applied');pass('capacity excess rolls back decision');
+ await API.transition(c.id,buyer.user.uid,'declined',buyer);await API.transition(c.id,second.user.uid,'selected',author);pass('declining releases slot for next applicant');
+ await API.transition(c.id,second.user.uid,'confirmed',second);pass('selected member confirms participation');
+ await assert.rejects(API.transition(c.id,buyer.user.uid,'selected',buyer));pass('applicant cannot select themselves');
+ c.supportStatus='approved';await assert.rejects(API.saveCall(c,author));await API.saveCall(c,admin);pass('yarn support approval is admin-only');
+ const yarnId='tester-yarn-'+c.id;await API.put('moakitYarns/'+yarnId,{brand:'테스트 브랜드',name:'테스트 원사',colors:'크림,블루',active:true,updatedAt:new Date().toISOString()},admin);
+ await API.appPatch(c.id,second.user.uid,{yarnId,yarnColor:'크림'},second);pass('selected participant chooses approved support yarn');
+ const shipping=`moakitTesterCalls/${c.id}/applications/${second.user.uid}/shipping/latest`;
+ await API.put(shipping,{content:JSON.stringify({recipient:'테스트',address:'테스트 주소',phone:'010-0000-0000'}),status:'requested',tracking:'',updatedAt:new Date().toISOString()},second);await assert.rejects(API.get(shipping,stranger));pass('delivery address remains private');
+ const sh=await API.get(shipping,author);await API.put(shipping,{...API.clean(sh),status:'shipped',tracking:'테스트택배 1234',updatedAt:new Date().toISOString()},author);pass('seller records shipping status');
+ // Advance simulated schedule through the admin to exercise result lifecycle.
+ c.status='testing';Object.assign(c,{applyStart:new Date(now-5*day).toISOString(),applyEnd:new Date(now-4*day).toISOString(),announceAt:new Date(now-3*day).toISOString(),testStart:new Date(now-day).toISOString()});await API.saveCall(c,admin);
+ await API.transition(c.id,second.user.uid,'in_progress',second);
+ const resultPath=`moakitTesterCalls/${c.id}/applications/${second.user.uid}/results/latest`;
+ await API.put(resultPath,{content:JSON.stringify({feedback:'완성했습니다.',errors:'2페이지 바늘 표기 확인',photos:[],publicConsent:false}),updatedAt:new Date().toISOString()},second);await API.transition(c.id,second.user.uid,'submitted',second);pass('participant submits private completion result');
+ await assert.rejects(API.get(resultPath,stranger));pass('completion photos and feedback are not public');
+ await API.transition(c.id,second.user.uid,'revision',author,'치수를 추가해주세요.');await API.put(resultPath,{content:JSON.stringify({feedback:'치수 추가 완료',photos:[]}),updatedAt:new Date().toISOString()},second);await API.transition(c.id,second.user.uid,'submitted',second);await API.transition(c.id,second.user.uid,'completed',author,'확인 완료');pass('seller requests revision and confirms final completion');
+ const done=await API.get(`moakitTesterCalls/${c.id}/applications/${second.user.uid}`,second);assert.equal(done.status,'completed');assert.equal(done.feedback,'확인 완료');
+ c.data.message='공고 소개 수정';c.testEnd=new Date(now+12*day).toISOString();await API.saveCall(c,author);pass('author edits public copy and extends testing dates while retaining applications');
+ const grant=await API.get(`moakitTesterCalls/${c.id}/private/file`,author);await API.put(`moakitTesterCalls/${c.id}/private/file`,{...API.clean(grant),expiresAt:new Date(Date.parse(c.testEnd)+7*day).toISOString()},author);pass('author extends frozen PDF delivery deadline');
+ c.status='completed';await API.saveCall(c,author);c.status='testing';await API.saveCall(c,author);pass('author reopens completed testing after extension');
+ await assert.rejects(API.saveCall({...c,data:{...c.data,message:'다른 작가 수정'}},stranger));pass('unrelated user cannot edit public recruitment');
+ c.status='suspended';await API.saveCall(c,admin);await assert.rejects(API.saveCall({...c,status:'recruiting'},author));pass('author cannot override operator suspension');
+ console.log(`${checks} TESTER FLOW checks passed`);
+}finally{globalThis.fetch=realFetch;}

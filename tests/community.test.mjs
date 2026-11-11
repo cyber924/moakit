@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+import {communityApi} from '../server/community.mjs';
+import {encodeFields} from '../public/member-core.mjs';
+const pid='seller_work',doc=d=>({fields:encodeFields(d)});
+function setup(){const sql=new DatabaseSync(':memory:');sql.exec(readFileSync(new URL('../drizzle/0000_slimy_silverclaw.sql',import.meta.url),'utf8'));let eligible=true,listed=true,profile=true;
+ const DB={prepare(query){let values=[];return{bind(...args){values=args;return this;},async all(){return{results:sql.prepare(query).all(...values)};},async first(){return sql.prepare(query).get(...values)||null;},async run(){return{meta:sql.prepare(query).run(...values)};}};}};
+ const fetcher=async(url,opts={})=>{if(url.includes('accounts:lookup')){const uid=JSON.parse(opts.body).idToken;return Response.json({users:[{localId:uid,email:uid==='admin'?'cyber924@naver.com':uid+'@test.invalid'}]});}
+ const path=new URL(url).pathname.split('/documents')[1];if(path==='/moakitPatterns/'+pid)return Response.json(doc({sellerUid:'seller',sourceId:'work',status:listed?'published':'suspended'}));
+ if(/^\/moakitUsers\/[^/]+$/.test(path))return profile?Response.json(doc({displayName:'테스터'})):Response.json({}, {status:404});
+ if(path.endsWith('/testerApplications'))return Response.json({documents:eligible?[doc({callId:'call',sellerUid:'seller'})]:[]});
+ if(path==='/moakitTesterCalls/call')return Response.json(doc({sellerUid:'seller',workId:'work'}));
+ if(path.includes('/applications/'))return Response.json(doc({status:'confirmed'}));throw Error(path);};
+ const req=async(uid,data,kind='question')=>communityApi(new Request('https://moa.test/api/community',{method:'POST',headers:{...(uid?{Authorization:'Bearer '+uid}:{}),'Content-Type':'application/json'},body:JSON.stringify({patternId:pid,kind,...data})}),{DB},fetcher);
+ const get=async(uid,kind='question',cursor='')=>{const r=await communityApi(new Request('https://moa.test/api/community?'+new URLSearchParams({patternId:pid,kind,cursor}),{headers:uid?{Authorization:'Bearer '+uid}:{}}),{DB},fetcher);assert.equal(r.status,200);return r.json();};
+ return{req,get,setEligible:v=>eligible=v,setListed:v=>listed=v,setProfile:v=>profile=v};}
+test('Q&A persists, lists publicly, restricts reply/edit/delete and guards versions',async()=>{const{req,get}=setup();assert.equal((await req('',{action:'create',body:'질문'})).status,401);const created=await req('buyer',{action:'create',body:'실이 얼마나 필요한가요?'});assert.equal(created.status,201);const{id}=await created.json();let p=(await get('')).posts[0];assert.equal(p.body,'실이 얼마나 필요한가요?');assert.equal(p.mine,false);assert.equal(p.canDelete,false);assert.equal(p.authorUid,undefined);
+ assert.equal((await req('stranger',{action:'edit',id,version:1,body:'교체'})).status,403);assert.equal((await req('stranger',{action:'reply',id,version:1,body:'거짓답변'})).status,403);
+ assert.equal((await req('seller',{action:'reply',id,version:1,body:'원본 도안의 소요량을 확인해주세요.'})).status,200);
+ assert.equal((await req('buyer',{action:'edit',id,version:1,body:'새 질문'})).status,409);
+ assert.equal((await req('buyer',{action:'edit',id,version:2,body:'바늘도 궁금해요.'})).status,200);
+ p=(await get('buyer')).posts[0];assert.equal(p.mine,true);assert.equal(p.version,3);assert.ok(p.reply);assert.equal((await req('stranger',{action:'delete',id,version:3})).status,403);assert.equal((await req('admin',{action:'delete',id,version:3})).status,200);assert.equal((await get('')).total,0);
+});
+test('text reviews require real confirmed tester, one review per person and work',async()=>{const s=setup();s.setEligible(false);assert.equal((await s.req('buyer',{action:'create',body:'좋아요'},'review')).status,403);s.setEligible(true);assert.equal((await s.req('seller',{action:'create',body:'셀프 후기'},'review')).status,403);assert.equal((await s.req('buyer',{action:'create',body:'설명이 이해하기 쉬웠어요.'},'review')).status,201);assert.equal((await s.req('buyer',{action:'create',body:'중복'},'review')).status,409);const r=await s.get('buyer','review');assert.equal(r.total,1);assert.equal(r.canReview,true);assert.equal(r.posts[0].body,'설명이 이해하기 쉬웠어요.');assert.equal(r.posts[0].photos,undefined);
+});
+test('pagination, text limits, profiles, suspended work and cross origin checks',async()=>{const s=setup();s.setProfile(false);assert.equal((await s.req('buyer',{action:'create',body:'질문'})).status,409);s.setProfile(true);assert.equal((await s.req('buyer',{action:'create',body:'x'.repeat(2001)})).status,400);for(let i=0;i<12;i++)assert.equal((await s.req('buyer',{action:'create',body:'질문 '+i})).status,201);const first=await s.get('');assert.equal(first.posts.length,10);assert.equal(first.total,12);assert.ok(first.nextCursor);const next=await s.get('','question',first.nextCursor);assert.equal(next.posts.length,2);assert.ok(next.posts.every(p=>!first.posts.some(x=>x.id===p.id)));s.setListed(false);assert.equal((await s.req('buyer',{action:'create',body:'질문'})).status,404);
+ const cross=await communityApi(new Request('https://moa.test/api/community',{method:'POST',headers:{origin:'https://other.test'},body:'{}'}),{});assert.equal(cross.status,403);
+});

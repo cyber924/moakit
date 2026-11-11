@@ -1,0 +1,104 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1792462502063,
+      "tag": "0000_slimy_silverclaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792472885511,
+      "tag": "0001_slippery_speed",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793233006943,
+      "tag": "0002_lethal_radioactive_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793597174270,
+      "tag": "0003_clever_triton",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793598417769,
+      "tag": "0004_familiar_adam_destine",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793599882283,
+      "tag": "0005_wealthy_spectrum",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793602791740,
+      "tag": "0006_daffy_lifeguard",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793662535766,
+      "tag": "0007_familiar_boom_boom",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793775806973,
+      "tag": "0008_classy_wrecker",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793779296177,
+      "tag": "0009_tricky_mother_askani",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793833374307,
+      "tag": "0010_sharp_spencer_smythe",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793929853200,
+      "tag": "0011_abnormal_onslaught",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794268800000,
+      "tag": "0012_unified_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794272400000,
+      "tag": "0013_weekly_dates",
+      "breakpoints": true
+    }
+  ]
+}

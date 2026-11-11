@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    // Administrator: designated Firebase Authentication email.
+    function admin() {
+      return signedIn() && (request.auth.token.get('email', '') == 'cyber924@naver.com'
+        || (firestore.exists(/databases/(default)/documents/moakitAdmins/$(request.auth.uid))
+          ? (firestore.get(/databases/(default)/documents/moakitAdmins/$(request.auth.uid)).data.active == true
+            && firestore.get(/databases/(default)/documents/moakitAdmins/$(request.auth.uid)).data.email == request.auth.token.get('email', ''))
+          : request.auth.token.get('email', '') in ['moadmin1@naver.com', 'moadmin2@naver.com']));
+    }
+    function validSize() { return request.resource.size > 0 && request.resource.size <= 10 * 1024 * 1024; }
+    match /moakit/public/{uid}/{workId}/{fileName} {
+      allow get: if true;
+      allow list: if owner(uid) || admin();
+      allow create, update: if (owner(uid) || admin()) && validSize()
+        && request.resource.contentType in ['image/jpeg','image/png','image/webp'];
+      allow delete: if owner(uid) || admin();
+    }
+    match /moakit/private/{uid}/{workId}/{fileName} {
+      allow get, list: if owner(uid) || admin();
+      allow create, update: if (owner(uid) || admin()) && validSize()
+        && request.resource.contentType == 'application/pdf'
+        && fileName.matches('.*[.][pP][dD][fF]');
+      allow delete: if owner(uid) || admin();
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

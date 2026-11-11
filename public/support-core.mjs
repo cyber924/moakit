@@ -1,0 +1,4 @@
+export const SUPPORT_KINDS={pattern:'상품·도안 문의',order:'주문·배송',tester:'테스터룸',report:'신고',other:'기타 문의'};
+export const SUPPORT_STATUS={received:'접수',reviewing:'확인 중',answered:'답변 완료',closed:'처리 완료'};
+export function supportHref(value=''){if(typeof value!=='string'||value.length>300||value&&!/^#(?:product\/|pattern\/|kit\/|my\/orders|tester-call\/|test-room\/)[A-Za-z0-9_/?=&.%+-]*$/.test(value))throw Error('작품·주문·테스터룸의 모아키트 내부 주소를 입력해주세요.');return value;}
+export function cleanTicket(raw){if(!raw||!Object.hasOwn(SUPPORT_KINDS,raw.kind))throw Error('문의 유형을 선택해주세요.');const title=String(raw.title||'').trim(),body=String(raw.body||'').trim();if(title.length<2||title.length>120||body.length<5||body.length>5000)throw Error('제목 2~120자, 내용 5~5000자로 입력해주세요.');return{kind:raw.kind,title,body,relatedHref:supportHref(raw.relatedHref||'')};}

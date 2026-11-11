@@ -1,0 +1,5 @@
+import {resolveAdmin} from './admin-access.mjs';
+const KEY='AIzaSyAwQpw0Q9vp8q_zpGL600yY47CMcogvXxg';
+export const kitFail=(message,status=400)=>Object.assign(Error(message),{status});
+export const kitJson=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'private, no-store','Vary':'Authorization','X-Content-Type-Options':'nosniff'}});
+export async function kitAuth(request,fetcher=fetch,admin=false){const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)throw kitFail('다른 사이트의 요청은 허용하지 않습니다.',403);const bearer=request.headers.get('authorization')||'';if(!/^Bearer [A-Za-z0-9._-]+$/.test(bearer))throw kitFail('로그인 후 이용해주세요.',401);const r=await fetcher('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key='+KEY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idToken:bearer.slice(7)}),signal:AbortSignal.timeout(15000)}),d=await r.json(),user=d.users?.[0];if(!r.ok||!user?.localId||user.disabled)throw kitFail('다시 로그인해주세요.',401);user.moakitAdmin=await resolveAdmin(user,bearer,fetcher);if(admin&&!user.moakitAdmin)throw kitFail('관리자 전용 기능입니다.',403);return user;}

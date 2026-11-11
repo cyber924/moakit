@@ -1,0 +1,374 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    function admin() {
+      return signedIn() && (request.auth.token.get('email', '') == 'cyber924@naver.com'
+        || (exists(/databases/$(database)/documents/moakitAdmins/$(request.auth.uid))
+          ? (get(/databases/$(database)/documents/moakitAdmins/$(request.auth.uid)).data.active == true
+            && get(/databases/$(database)/documents/moakitAdmins/$(request.auth.uid)).data.email == request.auth.token.get('email', ''))
+          : request.auth.token.get('email', '') in ['moadmin1@naver.com', 'moadmin2@naver.com']));
+    }
+    match /moakitAdmins/{uid} {
+      allow get: if owner(uid) || admin();
+      allow list: if admin();
+      allow create, update: if admin()
+        && request.resource.data.keys().hasAll(['uid','email','displayName','active','updatedAt','updatedBy'])
+        && request.resource.data.keys().hasOnly(['uid','email','displayName','active','updatedAt','updatedBy'])
+        && request.resource.data.uid == uid && request.resource.data.email is string
+        && request.resource.data.email != 'cyber924@naver.com'
+        && request.resource.data.displayName is string && request.resource.data.displayName.size() <= 30
+        && request.resource.data.active is bool && request.resource.data.updatedAt is string
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if false;
+    }
+    // Shared administration of existing content. Ownership and original document paths stay unchanged.
+    match /moakitPatterns/{patternId} {
+      allow get, list: if admin();
+      allow update: if admin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['content','status','updatedAt'])
+        && request.resource.data.content is string && request.resource.data.content.size() <= 30000
+        && request.resource.data.status in ['published','suspended']
+        && request.resource.data.updatedAt is string;
+    }
+    match /moakitUsers/{uid}/works/{workId} {
+      allow get, list: if admin();
+      allow update: if admin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['content','publicContent','status','step','updatedAt'])
+        && request.resource.data.content is string && request.resource.data.content.size() <= 150000
+        && request.resource.data.status in ['draft','submitted','published']
+        && request.resource.data.updatedAt is string;
+    }
+    match /moakitTesterCalls/{callId} {
+      allow get, list: if admin();
+      allow update: if admin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['content','notice','status','supportStatus','updatedAt'])
+        && request.resource.data.content is string && request.resource.data.content.size() <= 30000
+        && request.resource.data.notice is string && request.resource.data.notice.size() <= 2000
+        && request.resource.data.status in ['draft','pending','recruiting','closed','testing','completed','rejected','suspended']
+        && request.resource.data.supportStatus in ['disabled','requested','approved','rejected']
+        && request.resource.data.updatedAt is string;
+      match /{nested=**} { allow get, list: if admin(); }
+    }
+    match /moakitYarns/{yarnId} {
+      allow get, list: if admin();
+      allow update: if admin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['brand','name','colors','active','updatedAt'])
+        && request.resource.data.brand is string && request.resource.data.name is string
+        && request.resource.data.colors is string && request.resource.data.active is bool
+        && request.resource.data.updatedAt is string;
+    }
+    function exactKeys(d, fields) { return d.keys().hasAll(fields) && d.keys().hasOnly(fields); }
+    function text(value, max) { return value is string && value.size() <= max; }
+    function changed(fields) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields); }
+    function validProfile(data, uid) {
+      return exactKeys(data, ['uid', 'email', 'displayName', 'accountType', 'sellerStatus', 'sellerDisplayName', 'sellerBio', 'bio', 'knittingLevel', 'createdAt', 'updatedAt', 'privacyVersion'])
+        && data.uid == uid && text(data.email, 254)
+        && data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 30
+        && data.accountType in ['buyer', 'seller']
+        && data.sellerStatus in ['none', 'pending', 'approved', 'rejected']
+        && ((data.accountType == 'buyer' && data.sellerStatus == 'none') || (data.accountType == 'seller' && data.sellerStatus in ['pending', 'approved', 'rejected']))
+        && text(data.sellerDisplayName, 40) && (data.accountType == 'buyer' || data.sellerDisplayName.size() > 0)
+        && text(data.bio, 300) && text(data.sellerBio, 1000)
+        && data.knittingLevel in ['beginner', 'intermediate', 'advanced'] && text(data.createdAt, 35)
+        && text(data.updatedAt, 35) && data.privacyVersion == '2026-10-16';
+    }
+    match /moakitUsers/{uid} {
+      allow get: if owner(uid) || admin();
+      allow list: if admin();
+      allow create: if owner(uid) && validProfile(request.resource.data, uid)
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.sellerStatus in ['none', 'pending'];
+      allow update: if validProfile(request.resource.data, uid) && (
+        (admin() && changed(['displayName', 'bio', 'knittingLevel', 'sellerDisplayName', 'sellerBio', 'accountType', 'sellerStatus', 'updatedAt']))
+        || (owner(uid)
+          && changed(['displayName', 'bio', 'knittingLevel', 'sellerDisplayName', 'sellerBio', 'accountType', 'sellerStatus', 'updatedAt'])
+          && (
+            (request.resource.data.accountType == resource.data.accountType && request.resource.data.sellerStatus == resource.data.sellerStatus)
+            || (resource.data.sellerStatus in ['none', 'rejected'] && request.resource.data.accountType == 'seller' && request.resource.data.sellerStatus == 'pending')
+          )
+        )
+      );
+      allow delete: if admin();
+      match /testerApplications/{callId} {
+        allow get, list: if owner(uid);
+        allow create: if owner(uid) && exactKeys(request.resource.data, ['callId','applicantUid','sellerUid'])
+          && request.resource.data.callId == callId && request.resource.data.applicantUid == uid
+          && getAfter(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(uid)).data.applicantUid == uid
+          && getAfter(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(uid)).data.sellerUid == request.resource.data.sellerUid;
+      }
+      match /testerPreferences/{preferenceId} {
+        allow get: if owner(uid);
+        allow create, update: if owner(uid) && preferenceId == 'default'
+          && request.resource.data.keys().hasOnly(['content','updatedAt'])
+          && text(request.resource.data.content, 6000) && request.resource.data.updatedAt is string;
+      }
+      match /wishlist/{workId} {
+        allow get, list: if owner(uid) || admin();
+        allow create, update: if owner(uid) && workId.matches('w([1-9]|1[0-4])')
+          && request.resource.data.keys().hasOnly(['workId', 'createdAt'])
+          && request.resource.data.workId == workId && request.resource.data.createdAt is string;
+        allow delete: if owner(uid) || admin();
+      }
+    }
+    match /users/{userId} {
+      allow get: if owner(userId) || admin();
+      allow list: if admin();
+      allow create: if admin() || (owner(userId) && request.resource.data.id == userId);
+      allow update: if admin() || (owner(userId) && request.resource.data.id == resource.data.id);
+      allow delete: if owner(userId) || admin();
+      match /pitchDecks/{pitchDeckId} {
+        allow get, list: if owner(userId) || admin();
+        allow create: if admin() || (owner(userId) && request.resource.data.userId == userId);
+        allow update, delete: if admin() || (owner(userId) && resource.data.userId == userId);
+      }
+    }
+    match /moakitUsers/{uid}/works/{workId} {
+      function validWork() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['sellerUid','status','step','createdAt','updatedAt','content'])
+          && d.keys().hasOnly(['sellerUid','status','step','createdAt','updatedAt','content','publicContent'])
+          && d.sellerUid == uid && d.status in ['draft','submitted','published']
+          && d.step is int && d.step >= 1 && d.step <= 4 && text(d.createdAt, 35) && text(d.updatedAt, 35)
+          && text(d.content, 150000) && (d.status != 'published' || (
+            d.step == 4 && text(d.publicContent, 30000)
+          ));
+      }
+      function seller() {
+        return owner(uid) && get(/databases/$(database)/documents/moakitUsers/$(uid)).data.accountType == 'seller';
+      }
+      function publishAllowed() {
+        let id = uid + '_' + workId;
+        return request.resource.data.status != 'published' || (
+          (!exists(/databases/$(database)/documents/moakitPatterns/$(id))
+            || get(/databases/$(database)/documents/moakitPatterns/$(id)).data.status == 'published')
+          && getAfter(/databases/$(database)/documents/moakitPatterns/$(id)).data.status == 'published'
+          && getAfter(/databases/$(database)/documents/moakitPatterns/$(id)).data.content == request.resource.data.publicContent
+        );
+      }
+      allow get, list: if owner(uid) || admin();
+      allow create: if validWork() && (admin() || (seller() && publishAllowed()))
+        && request.resource.data.status in ['draft','published'];
+      allow update: if validWork() && request.resource.data.createdAt == resource.data.createdAt
+        && (admin() || (seller() && publishAllowed()
+          && (resource.data.status != 'published' || request.resource.data.status == 'published')));
+      allow delete: if admin() || (owner(uid) && resource.data.status == 'draft');
+    }
+    match /moakitPatterns/{patternId} {
+      function validListing() {
+        let d = request.resource.data;
+        return exactKeys(d, ['sellerUid','sourceId','status','updatedAt','content'])
+          && d.sellerUid is string && d.sourceId is string && patternId == d.sellerUid + '_' + d.sourceId
+          && d.status in ['published','suspended'] && text(d.updatedAt, 35) && text(d.content, 30000);
+      }
+      function ownerPublication() {
+        let d = request.resource.data;
+        let source = getAfter(/databases/$(database)/documents/moakitUsers/$(d.sellerUid)/works/$(d.sourceId)).data;
+        return owner(d.sellerUid)
+          && get(/databases/$(database)/documents/moakitUsers/$(d.sellerUid)).data.accountType == 'seller'
+          && d.status == 'published' && source.status == 'published' && source.publicContent == d.content;
+      }
+      allow get, list: if admin();
+      allow get, list: if resource.data.status == 'published' || owner(resource.data.sellerUid);
+      allow create: if validListing() && (admin() || ownerPublication());
+      allow update: if validListing() && request.resource.data.sellerUid == resource.data.sellerUid
+        && request.resource.data.sourceId == resource.data.sourceId
+        && (admin() || (resource.data.status == 'published' && ownerPublication()));
+      allow delete: if admin();
+    }
+    function callDoc(id) { return get(/databases/$(database)/documents/moakitTesterCalls/$(id)).data; }
+    function callOwner(id) { return owner(callDoc(id).sellerUid); }
+    function activeTester(s) { return s in ['selected','confirmed','in_progress','submitted','revision','completed']; }
+    function recruitmentOpen(c) {
+      return c.status == 'recruiting' && request.time >= timestamp.value(c.applyStart)
+        && request.time <= timestamp.value(c.applyEnd);
+    }
+    match /moakitTesterCalls/{callId} {
+      function validCall() {
+        let d = request.resource.data;
+        return exactKeys(d, ['sellerUid','workId','status','capacity','applyStart','applyEnd','announceAt','testStart','testEnd','supportStatus','createdAt','updatedAt','content','notice'])
+          && d.sellerUid is string && d.workId is string
+          && d.status in ['draft','pending','recruiting','closed','testing','completed','rejected','suspended']
+          && d.capacity is int && d.capacity >= 1 && d.capacity <= 100
+          && d.supportStatus in ['disabled','requested','approved','rejected'] && text(d.content, 30000)
+          && text(d.notice, 2000) && d.createdAt is string && d.updatedAt is string
+          && d.applyStart is string && d.applyEnd is string && d.announceAt is string
+          && d.testStart is string && d.testEnd is string;
+      }
+      function validSchedule() {
+        let d = request.resource.data;
+        return timestamp.value(d.applyStart) <= timestamp.value(d.applyEnd)
+          && timestamp.value(d.applyEnd) <= timestamp.value(d.announceAt)
+          && timestamp.value(d.announceAt) <= timestamp.value(d.testStart)
+          && timestamp.value(d.testStart) <= timestamp.value(d.testEnd);
+      }
+      allow read: if admin() || resource.data.status in ['recruiting','closed','testing','completed']
+        || owner(resource.data.sellerUid);
+      allow create: if validCall() && owner(request.resource.data.sellerUid)
+        && get(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)).data.accountType == 'seller'
+        && exists(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)/works/$(request.resource.data.workId))
+        && request.resource.data.status == 'draft'
+        && request.resource.data.supportStatus in ['disabled','requested'];
+      // Authors publish immediately and edit their own recruitment. Operator suspension stays authoritative.
+      function capacityAvailable() {
+        return !exists(/databases/$(database)/documents/moakitTesterCalls/$(callId)/ops/selection)
+          || request.resource.data.capacity >= getAfter(/databases/$(database)/documents/moakitTesterCalls/$(callId)/ops/selection).data.selectedUids.size();
+      }
+      function authorTransition() {
+        let before = resource.data.status;
+        let after = request.resource.data.status;
+        return after == before
+          || (before in ['draft','pending','rejected'] && after in ['draft','pending','recruiting'])
+          || (before == 'recruiting' && after == 'closed')
+          || (before == 'closed' && after in ['recruiting','testing'])
+          || (before == 'testing' && after == 'completed')
+          || (before == 'completed' && after == 'testing');
+      }
+      allow update: if validCall() && capacityAvailable()
+        && request.resource.data.sellerUid == resource.data.sellerUid
+        && request.resource.data.workId == resource.data.workId
+        && request.resource.data.createdAt == resource.data.createdAt && (
+          (admin() && validSchedule()) || (
+            owner(resource.data.sellerUid)
+            && get(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)).data.accountType == 'seller'
+            && resource.data.status != 'suspended' && authorTransition()
+            && changed(['status','capacity','applyStart','applyEnd','announceAt','testStart','testEnd','content','notice','updatedAt','supportStatus'])
+            && (request.resource.data.supportStatus == resource.data.supportStatus
+              || (resource.data.status in ['draft','rejected'] && request.resource.data.supportStatus in ['disabled','requested']))
+            && (request.resource.data.status == 'draft' || validSchedule())
+            && (!(resource.data.status in ['draft','pending','rejected'])
+              || request.resource.data.status == 'draft'
+              || exists(/databases/$(database)/documents/moakitTesterCalls/$(callId)/private/file))
+          )
+        );
+      allow delete: if admin() || (owner(resource.data.sellerUid) && resource.data.status in ['draft','rejected']);
+      match /ops/selection {
+        function validOp() {
+          let d = request.resource.data;
+          return d.keys().hasOnly(['selectedUids','changedUid','updatedAt'])
+            && d.selectedUids is list && d.selectedUids.size() <= callDoc(callId).capacity
+            && d.selectedUids.toSet().size() == d.selectedUids.size()
+            && d.changedUid is string && d.updatedAt is string;
+        }
+        allow get: if callOwner(callId) || admin()
+          || (signedIn() && request.auth.uid in resource.data.selectedUids);
+        allow create: if (callOwner(callId) || admin()) && validOp()
+          && request.resource.data.selectedUids.size() == 0;
+        allow update: if validOp() && (
+          callOwner(callId) || admin() || owner(request.resource.data.changedUid)
+        ) && (
+          (!resource.data.selectedUids.hasAny([request.resource.data.changedUid])
+            && request.resource.data.selectedUids == resource.data.selectedUids.concat([request.resource.data.changedUid])
+            && getAfter(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(request.resource.data.changedUid)).data.status == 'selected')
+          || (resource.data.selectedUids.hasAny([request.resource.data.changedUid])
+            && request.resource.data.selectedUids == resource.data.selectedUids.removeAll([request.resource.data.changedUid])
+            && !activeTester(getAfter(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(request.resource.data.changedUid)).data.status))
+        );
+      }
+      match /applications/{applicantId} {
+        function validApplication() {
+          let d = request.resource.data;
+          return exactKeys(d, ['applicantUid','sellerUid','callId','status','createdAt','updatedAt','yarnId','yarnColor','content','feedback'])
+            && d.applicantUid == applicantId && d.callId == callId && d.sellerUid == callDoc(callId).sellerUid
+            && d.status in ['applied','selected','rejected','withdrawn','declined','confirmed','in_progress','submitted','revision','completed']
+            && text(d.content, 12000) && text(d.feedback, 2000) && d.yarnId is string && text(d.yarnColor, 200)
+            && d.createdAt is string && d.updatedAt is string;
+        }
+        function slotMatches() {
+          let list = getAfter(/databases/$(database)/documents/moakitTesterCalls/$(callId)/ops/selection).data.selectedUids;
+          return activeTester(request.resource.data.status) == list.hasAny([applicantId]);
+        }
+        allow get, list: if owner(applicantId) || callOwner(callId) || admin();
+        allow create: if owner(applicantId) && validApplication() && applicantId != callDoc(callId).sellerUid
+          && exists(/databases/$(database)/documents/moakitUsers/$(applicantId))
+          && recruitmentOpen(callDoc(callId)) && request.resource.data.status == 'applied'
+          && request.resource.data.yarnId == '' && request.resource.data.yarnColor == '' && request.resource.data.feedback == '';
+        allow update: if validApplication() && request.resource.data.createdAt == resource.data.createdAt && (
+            ((callOwner(callId) || admin()) && callDoc(callId).status in ['recruiting','closed','testing']
+              && changed(['status','updatedAt','feedback']) && (
+                (resource.data.status == 'applied' && request.resource.data.status in ['selected','rejected'])
+                || (resource.data.status == 'selected' && request.resource.data.status == 'rejected')
+                || (resource.data.status == 'submitted' && request.resource.data.status in ['completed','revision'])
+              )
+              && ((!activeTester(resource.data.status) && !activeTester(request.resource.data.status)) || slotMatches()))
+            || (owner(applicantId) && changed(['status','content','updatedAt','yarnId','yarnColor']) && (
+              (resource.data.status == 'applied' && recruitmentOpen(callDoc(callId)) && request.resource.data.status in ['applied','withdrawn']
+                && request.resource.data.yarnId == resource.data.yarnId && request.resource.data.yarnColor == resource.data.yarnColor)
+              || (request.resource.data.content == resource.data.content && (
+                (resource.data.status == 'selected' && request.resource.data.status in ['confirmed','declined'] && slotMatches())
+                || (resource.data.status == 'confirmed' && request.resource.data.status == 'in_progress')
+                || (resource.data.status in ['confirmed','in_progress','revision'] && request.resource.data.status == 'submitted'
+                  && existsAfter(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(applicantId)/results/latest))
+                || (activeTester(resource.data.status) && request.resource.data.status == resource.data.status)
+              ) && (request.resource.data.yarnId == resource.data.yarnId && request.resource.data.yarnColor == resource.data.yarnColor
+                || (callDoc(callId).supportStatus == 'approved' && activeTester(request.resource.data.status)
+                  && get(/databases/$(database)/documents/moakitYarns/$(request.resource.data.yarnId)).data.active == true)))
+            ))
+          );
+        match /results/latest {
+          allow read: if owner(applicantId) || callOwner(callId) || admin();
+          allow create, update: if owner(applicantId) && request.time >= timestamp.value(callDoc(callId).testStart)
+            && request.time <= timestamp.value(callDoc(callId).testEnd) + duration.value(7, 'd')
+            && callDoc(callId).status in ['recruiting','closed','testing']
+            && get(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(applicantId)).data.status in ['confirmed','in_progress','revision']
+            && request.resource.data.keys().hasOnly(['content','updatedAt'])
+            && text(request.resource.data.content, 550000) && request.resource.data.updatedAt is string;
+        }
+        match /shipping/latest {
+          allow read: if owner(applicantId) || callOwner(callId) || admin();
+          allow create: if owner(applicantId) && callDoc(callId).supportStatus == 'approved'
+            && activeTester(get(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(applicantId)).data.status)
+            && request.resource.data.keys().hasOnly(['content','status','tracking','updatedAt'])
+            && text(request.resource.data.content, 5000)
+            && request.resource.data.status == 'requested' && request.resource.data.tracking == ''
+            && request.resource.data.updatedAt is string;
+          allow update: if request.resource.data.keys().hasOnly(['content','status','tracking','updatedAt'])
+            && request.resource.data.content == resource.data.content && (callOwner(callId) || admin())
+            && request.resource.data.status in ['requested','preparing','shipped','delivered']
+            && text(request.resource.data.tracking, 500) && request.resource.data.updatedAt is string;
+        }
+      }
+      match /private/file {
+        allow get: if callOwner(callId) || admin() || (signedIn()
+          && activeTester(get(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(request.auth.uid)).data.status));
+        function validFileGrant() {
+          return request.resource.data.keys().hasOnly(['blob','expiresAt','createdAt'])
+            && text(request.resource.data.blob, 5000)
+            && request.resource.data.expiresAt is string && request.resource.data.createdAt is string
+            && timestamp.value(request.resource.data.expiresAt) <= timestamp.value(callDoc(callId).testEnd) + duration.value(7, 'd');
+        }
+        allow create: if callOwner(callId) && callDoc(callId).status in ['draft','rejected'] && validFileGrant();
+        allow update: if callOwner(callId) && validFileGrant() && (
+          callDoc(callId).status in ['draft','rejected']
+          || (callDoc(callId).status != 'suspended' && changed(['expiresAt']))
+        );
+      }
+    }
+    match /moakitYarns/{yarnId} {
+      allow read: if admin() || resource.data.active == true;
+      allow create, update: if admin()
+        && request.resource.data.keys().hasOnly(['brand','name','colors','active','updatedAt'])
+        && text(request.resource.data.brand, 100) && text(request.resource.data.name, 150)
+        && text(request.resource.data.colors, 2000)
+        && request.resource.data.active is bool && request.resource.data.updatedAt is string;
+      allow delete: if admin();
+    }
+    match /moakitAdminLogs/{logId} {
+      allow get, list: if admin();
+      allow create: if admin()
+        && exactKeys(request.resource.data, ['actorUid','targetUid','action','reason','changedFields','beforeType','afterType','beforeStatus','afterStatus','createdAt'])
+        && request.resource.data.actorUid == request.auth.uid && request.resource.data.targetUid is string
+        && request.resource.data.targetUid.size() > 0 && request.resource.data.targetUid.size() <= 128
+        && request.resource.data.action == 'member.update'
+        && request.resource.data.reason is string && request.resource.data.reason.size() > 0 && request.resource.data.reason.size() <= 500
+        && text(request.resource.data.changedFields, 200)
+        && request.resource.data.beforeType in ['buyer','seller'] && request.resource.data.afterType in ['buyer','seller']
+        && request.resource.data.beforeStatus in ['none','pending','approved','rejected']
+        && request.resource.data.afterStatus in ['none','pending','approved','rejected']
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

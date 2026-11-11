@@ -1,0 +1,1 @@
+export function csvText(rows){const cell=v=>{let text=String(v??'');if(typeof v==='string'&&/^[\s]*[=+\-@\t\r]/.test(text))text="'"+text;return '"'+text.replaceAll('"','""')+'"';};return '\ufeff'+rows.map(r=>r.map(cell).join(',')).join('\r\n');}
