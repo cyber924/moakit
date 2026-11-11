@@ -6,7 +6,7 @@ const {initializeApp,getApps}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth');
 const {getFirestore}=require('firebase-admin/firestore');
 const {getStorage}=require('firebase-admin/storage');
-const {createHash}=require('node:crypto');
+const {createHash,randomUUID}=require('node:crypto');
 const core=require('./commerce-core.cjs');
 const {fail,validId,amount,revenue7030,shippingInput,itemIds,kitQuote,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale}=core;
 if(!getApps().length)initializeApp({storageBucket:'studio-1613487721-b043c.firebasestorage.app'});
@@ -52,8 +52,8 @@ async function session(req,admin=false){
  if(admin){
   const snap=await ref('moakitAdmins',user.uid).get();
   const saved=snap.data()||{};
-  person.admin=['cyber924@naver.com','moadmin1@naver.com','moadmin2@naver.com'].includes(person.email)
-   ||(saved.active===true&&saved.email===person.email);
+  person.admin=snap.exists?(saved.active===true&&saved.email===person.email)
+   :['cyber924@naver.com','moadmin1@naver.com','moadmin2@naver.com'].includes(person.email);
   if(!person.admin)throw fail('관리자 권한이 필요합니다.',403);
  }
  return person;
@@ -69,7 +69,8 @@ function json(res,result,status=200){
 }
 async function statusRoute(req,res){
  if(req.method!=='GET')throw fail('GET 요청만 허용합니다.',405);
- json(res,{active:await active(),mode:await active()?'firebase':'legacy',engine:'firebase-functions-v2'});
+ const enabled=await active();
+ json(res,{active:enabled,mode:enabled?'firebase':'legacy',engine:'firebase-functions-v2'});
 }
 async function healthRoute(req,res){
  await adminSession(req);
@@ -118,7 +119,7 @@ async function catalogRoute(req,res){
  }
  if(req.method!=='POST')throw fail('요청 형식이 올바르지 않습니다.',405);
  await adminSession(req);
- const input=req.body||{},id=input.id;
+ const input=req.body||{},id=input.id||(input.action==='save'?randomUUID():undefined);
  if(!validId(id))throw fail('KIT 번호를 확인해주세요.');
  if(input.action==='save'){
   const val=input.kit;
@@ -155,6 +156,24 @@ async function catalogRoute(req,res){
    return {...kit,version:kit.version+1};
   });
   return json(res,{kit:result});
+ }
+ if(input.action==='bulkStatus'){
+  if(!['published','suspended'].includes(input.status)||!Array.isArray(input.items)
+   ||input.items.length<1||input.items.length>100
+   ||input.items.some(x=>!validId(x.id)||!Number.isInteger(x.version))
+   ||new Set(input.items.map(x=>x.id)).size!==input.items.length)
+   throw fail('일괄 변경할 KIT를 확인해주세요.');
+  await db.runTransaction(async tx=>{
+   const snaps=await Promise.all(input.items.map(x=>tx.get(ref(collections.kits,x.id))));
+   for(const [i,snap] of snaps.entries()){
+    if(!snap.exists||snap.data().status==='deleted'||snap.data().version!==input.items[i].version)
+     throw fail('KIT 정보가 변경되었습니다.',409);
+   }
+   const timestamp=now();
+   for(const snap of snaps)tx.update(snap.ref,{status:input.status,
+    version:snap.data().version+1,updatedAt:timestamp});
+  },{maxAttempts:5});
+  return json(res,{updated:input.items.length});
  }
  throw fail('지원하지 않는 KIT 기능입니다.',501);
 }
@@ -379,7 +398,8 @@ async function buyPattern(user,id,res){
    throw fail('기존 구매 기록을 관리자에게 확인해주세요.',409);
   }
   const listing=nowProduct.data();
-  if(!listing||listing.status!=='published'||listing.content!==product.listing.content)
+  if(!listing||listing.status!=='published'||listing.content!==product.listing.content
+   ||listing.sellerUid!==product.listing.sellerUid||listing.sourceId!==product.listing.sourceId)
    throw fail('도안 가격 또는 공개 상태가 변경됐습니다.',409);
   const time=now(),parts=revenue7030(product.price);
   const receipt={id:orderRef.id,kind:'pattern',buyerUid:user.uid,sourceOrderId:id,
@@ -457,7 +477,7 @@ async function financeRoute(req,res){
  if(input.action!=='createSettlement')throw fail('지원하지 않는 정산 기능입니다.');
  const {sellerUid,sellerName,from,to}=input,ids=input.saleIds;
  if(!validId(sellerUid)||!Array.isArray(ids)||ids.length<1||ids.length>100
-  ||ids.some(x=>!validId(x))||new Set(ids).size!==ids.length
+  ||ids.some(x=>typeof x!=='string'||!/^[A-Za-z0-9_-]{1,450}$/.test(x))||new Set(ids).size!==ids.length
   ||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from||'')||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to||'')
   ||from>to)throw fail('정산 대상·기간을 확인해주세요.');
  const sorted=[...ids].sort(),suffix=createHash('sha256').update(sorted.join('|')).digest('hex').slice(0,24);
