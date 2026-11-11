@@ -55,6 +55,8 @@ test('KIT mirror excludes shipping addresses and relies on Work server checkout'
 });
 test('test share is 70:30 without real payments',()=>{
  assert.deepEqual(splitTestRevenue(25000),{seller:17500,platform:7500,total:25000});
+ assert.deepEqual(splitTestRevenue(22000),{seller:15400,platform:6600,total:22000});
+ assert.deepEqual(splitTestRevenue(88000),{seller:61600,platform:26400,total:88000});
  assert.deepEqual(splitTestRevenue(101),{seller:70,platform:31,total:101});
  assert.throws(()=>splitTestRevenue(-1));
 });

@@ -2,6 +2,7 @@ import {
  testOrders,confirmedSales,settlementRecords,confirmTestSale,
  createTestSettlement,importLegacySales,importLegacyKitOrders,importLegacySettlements
 } from './finance-firestore.mjs';
+import {reconcileTestFinance} from './finance-reconciliation-core.mjs';
 
 const E=s=>String(s??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 const W=n=>Number(n||0).toLocaleString('ko-KR')+'원';
@@ -31,8 +32,10 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
  }
  function draw(){
   if(!live())return;
-  const claimed=new Set(settlements.flatMap(b=>String(b.saleIds||'').split(',').filter(Boolean)));
-  const usable=sales.filter(x=>x.mode==='test'&&x.status==='reviewed'&&!claimed.has(x._docId||x.orderId)&&x.sellerUid&&x.sellerUid!=='__platform__');
+  const reconciliation=reconcileTestFinance(sales,settlements);
+  const usable=reconciliation.eligible;
+  const claimedIds=new Set(reconciliation.claimed.map(s=>s._docId||s.orderId));
+  const blockedIds=new Set(reconciliation.blocked.map(x=>x.sale._docId||x.sale.orderId));
   const grouped=Object.create(null);for(const item of usable)(grouped[item.sellerUid]??=[]).push(item);
   target.innerHTML='<section class="admin-card"><h2>Firebase 테스트 거래 통합</h2><p class="admin-notice">실제 결제·송금이 없습니다. 구매 원본과 검증하기 전에는 판매금액에 포함하지 않습니다.</p>'+
    '<div class="admin-stat-grid">'+[
@@ -44,18 +47,23 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
    '<button type="button" class="admin-button" data-fin-db-action="kits">기존 KIT 주문 가져오기</button>'+
    '<button type="button" class="admin-button" data-fin-db-action="batches">기존 D1 정산서 가져오기</button></div>'+
    '<p role="status" class="admin-notice" data-firebase-note>기존 기록을 가져와도 원본 D1 데이터는 삭제되지 않습니다.</p>'+
+   '<p class="admin-notice">정수 70:30 계산으로 과거 테스트 판매 '+reconciliation.roundingCorrections+'건, 총 '+W(reconciliation.roundingCorrectionWon)+'의 표시 오차를 보정했습니다. 원본 Firebase 문서는 변경하지 않았습니다.'+
+   (reconciliation.blocked.length?' · 원본 정산서 매칭 전까지 '+reconciliation.blocked.length+'건은 재정산 보류합니다.':' · 기존 D1 정산서와 연결된 거래는 미정산에서 제외됩니다.')+'</p>'+
    '<h3>구매 기록 · 미검증 테스트 원장</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>상품</th><th>구매자</th><th>표시금액</th><th>상태</th><th>작업</th></tr></thead><tbody>'+
    orders.slice(0,100).map(o=>'<tr><td>'+E(o.title)+'<small>'+E(o.kind==='kit'?'KIT':'도안')+' · '+E(o.sourceOrderId)+'</small></td><td>'+E(o.buyerUid)+'</td><td>'+W(o.amount)+'</td><td>검증 전 · 실제 청구 0원</td><td><button type="button" class="admin-button" data-verify-order="'+E(o.id)+'" '+(sales.some(s=>s.orderId===o.id||s.sourceOrderId===o.sourceOrderId)?'disabled':'')+'>원본 대조</button></td></tr>').join('')+
    (orders.length?'':'<tr><td colspan="5">아직 Firebase로 복사한 구매 기록이 없습니다.</td></tr>')+
    '</tbody></table></div><h3>검증·이전된 테스트 판매</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>작가</th><th>상품</th><th>표시금액</th><th>작가 몫</th><th>상태</th></tr></thead><tbody>'+
-   sales.slice(0,100).map(s=>'<tr><td>'+E(s.sellerName||s.sellerUid)+'</td><td>'+E(s.title)+'</td><td>'+W(s.amount)+'</td><td>'+W(s.sellerShare)+'</td><td>'+E(s.status==='settled-in-work'?'기존 정산 포함':s.status)+'</td></tr>').join('')+
+   sales.slice(0,100).map(s=>'<tr><td>'+E(s.sellerName||s.sellerUid)+'</td><td>'+E(s.title)+'</td><td>'+W(s.amount)+'</td><td>'+W(s.sellerShare)+(s.roundingCorrection?'<small>정수 계산으로 1원 보정</small>':'')+'</td><td>'+E(claimedIds.has(s._docId||s.orderId)?'기존 정산서 연결됨':blockedIds.has(s._docId||s.orderId)?'D1 원본 대조 보류':s.status==='settled-in-work'?'기존 정산 포함':s.status)+'</td></tr>').join('')+
    (sales.length?'':'<tr><td colspan="5">아직 검증된 판매가 없습니다.</td></tr>')+
    '</tbody></table></div>'+
    '<h3>정산 검토 (테스트 전용)</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>작가</th><th>미정산 건</th><th>테스트 지급 예정액</th><th>작업</th></tr></thead><tbody>'+
    Object.entries(grouped).map(([uid,rows])=>'<tr><td>'+E(rows[0].sellerName||uid)+'</td><td>'+rows.length+'건</td><td>'+W(rows.reduce((n,s)=>n+Number(s.sellerShare||0),0))+'</td><td><button type="button" class="admin-button" data-create-settlement="'+E(uid)+'">테스트 정산 검토서 생성</button></td></tr>').join('')+
    (Object.keys(grouped).length?'':'<tr><td colspan="4">정산 검토 대상이 없습니다.</td></tr>')+
    '</tbody></table></div><h3>Firebase 정산서 '+settlements.length+'건</h3><p class="admin-notice">정산서는 테스트 검토 기록이며 실제 지급 기능은 없습니다. 기존 Work 확정·지급 기록도 변경하지 않습니다.</p>'+
-   settlements.slice(0,30).map(b=>'<p>'+E(b.sellerName||b.sellerUid)+' · '+W(b.payout)+' · '+E(b.source==='legacy-d1'?'기존 D1 복사':'테스트 검토')+'</p>').join('')+
+   reconciliation.batches.slice(0,30).map(b=>'<p>'+E(b.sellerName||b.sellerUid)+' · '+W(b.payout)+' · '+E(b.source==='legacy-d1'?'기존 D1 복사':'테스트 검토')+
+    (b.source==='legacy-d1'?' · 원본 판매 연결 '+b.matchedSales+'/'+b.sourceSales+'건'+
+     (b.reconciled?' · 정산금 대조 '+(b.payoutDifference===0?'일치':W(b.payoutDifference)+' 차이 · 확인 필요'):' · 누락 원본 대조 필요'):'')+
+    '</p>').join('')+
    '</section>';
   target.querySelectorAll('[data-verify-order]').forEach(b=>b.onclick=()=>run(async()=>{
    const order=orders.find(x=>x.id===b.dataset.verifyOrder);

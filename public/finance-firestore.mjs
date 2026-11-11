@@ -1,4 +1,5 @@
 import {encodeFields,decodeDocument} from './member-core.mjs';
+import {revenue7030,normalizedTestSale,reconcileTestFinance} from './finance-reconciliation-core.mjs';
 
 const PROJECT='studio-1613487721-b043c';
 const ROOT='https://firestore.googleapis.com/v1/projects/'+PROJECT+'/databases/(default)/documents';
@@ -120,8 +121,11 @@ export async function testOrders({role='buyer',uid}={}){
 }
 export async function confirmedSales({role='admin',uid}={}){
  const current=await authToken();
- if(role==='admin')return all(COLLECTIONS.sales);
- return query(COLLECTIONS.sales,'sellerUid',uid||current.uid);
+ const rows=role==='admin'?await all(COLLECTIONS.sales)
+   :await query(COLLECTIONS.sales,'sellerUid',uid||current.uid);
+ // Historic Firebase imported records remain immutable. Present corrected
+ // 70:30 amounts in the ledger without mutating the original documents.
+ return rows.map(normalizedTestSale);
 }
 export async function settlementRecords({role='admin',uid}={}){
  const current=await authToken();
@@ -131,8 +135,7 @@ export async function settlementRecords({role='admin',uid}={}){
 export function splitTestRevenue(amount){
  const total=int(amount);
  if(!Number.isFinite(total))throw Error('판매금액을 확인해주세요.');
- const seller=Math.floor(total*0.7),platform=total-seller;
- return {seller,platform,total};
+ return revenue7030(total);
 }
 // Compare a pending browser receipt with the original Work purchase or KIT
 // order before marking a TEST sale as reviewed. The legacy APIs are temporary;
@@ -214,14 +217,21 @@ export async function createTestSettlement({sellerUid,sellerName,from,to,sales})
  const {uid}=await authToken();
  if(!ID.test(sellerUid)||!Array.isArray(sales)||!sales.length||sales.length>100)
   throw Error('정산할 작가 및 판매 기록을 확인해주세요.');
- const unique=[...new Set(sales.map(x=>x._docId||x.orderId))];
- if(unique.length!==sales.length||sales.some(x=>x.sellerUid!==sellerUid||x.mode!=='test'||x.status!=='reviewed'))
-  throw Error('이미 정산됐거나 검토되지 않은 판매 기록입니다.');
- // The browser cannot settle a sale twice: consult the existing immutable batches.
+ if(sales.some(s=>s.sellerUid!==sellerUid||s.mode!=='test'||s.status!=='reviewed'))
+  throw Error('검증되지 않은 판매 건은 정산 대상이 아닙니다.');
+ // Match both D1 raw sale IDs and prefixed Firebase IDs before any new draft.
  const past=await settlementRecords({role:'admin'});
- const claimed=new Set(past.flatMap(x=>String(x.saleIds||'').split(',').filter(Boolean)));
- if(unique.some(x=>claimed.has(x)))throw Error('이미 정산서에 포함된 판매 기록이 있습니다.');
- const amount=sales.reduce((n,x)=>n+int(x.amount),0),payout=sales.reduce((n,x)=>n+int(x.sellerShare),0);
+ // Reconcile against ALL existing sales: checking only selected rows would
+ // incorrectly label a complete imported D1 batch as having missing members.
+ const freshSales=await confirmedSales({role:'admin'});
+ const checked=reconcileTestFinance(freshSales,past);
+ const eligibleById=new Map(checked.eligible.map(x=>[x._docId||x.orderId,x]));
+ const unique=[...new Set(sales.map(x=>x._docId||x.orderId))];
+ const selected=unique.map(id=>eligibleById.get(id));
+ if(unique.length!==sales.length||selected.some(x=>!x||x.sellerUid!==sellerUid))
+  throw Error('기존 D1 정산서와 겹치거나 원본 대조가 필요한 거래입니다. 중복 정산을 방지했습니다.');
+ const amount=selected.reduce((n,x)=>n+int(x.amount),0);
+ const payout=selected.reduce((n,x)=>n+int(x.sellerShare),0);
  if(!Number.isSafeInteger(amount)||!Number.isSafeInteger(payout))throw Error('정산 금액을 확인해주세요.');
  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(unique.sort().join('|')));
  const suffix=Array.from(new Uint8Array(digest)).slice(0,12).map(n=>n.toString(16).padStart(2,'0')).join('');
