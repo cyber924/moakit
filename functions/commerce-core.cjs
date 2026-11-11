@@ -53,6 +53,7 @@ function kitQuote(lines,kits,{preview=false}={}){
  return {items,quantities,shippingFee,total};
 }
 function checkoutFingerprint(uid,checkoutKey,lines,shipping){
+ if(!Array.isArray(lines)||lines.some(x=>!Array.isArray(x.extras)))throw fail('KIT 옵션을 확인해주세요.');
  if(!validId(uid)||typeof checkoutKey!=='string'||!/^[a-f0-9-]{36}$/i.test(checkoutKey))
   throw fail('주문번호를 확인해주세요.');
  const canonical=lines.map(x=>({id:x.id,quantity:x.quantity,version:x.version,size:x.size,
@@ -71,6 +72,6 @@ function isTrustedPatternSale(sale,uid,id){
  return sale?.kind==='pattern'&&sale.buyerUid===uid&&sale.productId===id
   &&sale.mode==='test'&&sale.charged===0&&!refunded(sale)
   &&['firebase-transaction','legacy-d1-finance','legacy-pattern-purchase'].includes(sale.verifiedSource)
-  &&sale.status==='reviewed';
+  &&['reviewed','settled-in-work'].includes(sale.status);
 }
 module.exports={fail,validId,amount,revenue7030,shippingInput,itemIds,kitQuote,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale};
