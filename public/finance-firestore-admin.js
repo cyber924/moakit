@@ -96,12 +96,27 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
    const uid=b.dataset.createSettlement,rows=grouped[uid]||[];
    if(!rows.length)throw Error('검토할 판매가 없습니다.');
    const sorted=rows.map(x=>x.createdAt).sort();
-   await createTestSettlement({
+   const settlementInput={
     sellerUid:uid,sellerName:rows[0].sellerName||'작가',
     from:sorted[0]?.slice(0,10)||new Date().toISOString().slice(0,10),
     to:sorted.at(-1)?.slice(0,10)||new Date().toISOString().slice(0,10),
     sales:rows
-   });
+   };
+   if(await commerceMode()==='firebase'){
+    const account=window.MoaAccount?.user;
+    if(!account)throw Error('관리자 로그인이 필요합니다.');
+    const response=await fetch('/api/commerce-finance',{method:'POST',
+     headers:{Authorization:'Bearer '+await account.getIdToken(),
+      'Content-Type':'application/json','X-MOAKIT-FIREBASE-COMMERCE':'1'},
+     body:JSON.stringify({action:'createSettlement',sellerUid:uid,
+      sellerName:settlementInput.sellerName,from:settlementInput.from,to:settlementInput.to,
+      saleIds:rows.map(x=>x._docId||x.orderId)}),
+     signal:AbortSignal.timeout(40000)});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(result.error||'Firebase 정산 검토서를 만들지 못했습니다.');
+   }else{
+    await createTestSettlement(settlementInput);
+   }
    return 'Firebase 테스트 정산서 생성 완료 (송금 없음)';
   }));
   async function migrateAllOrders(){
