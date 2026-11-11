@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { backendRoute, SHARED_API_PATHS, BACKEND_ORIGIN } from '../server/backend-routing.mjs';
+import {isFirebaseAdminReadAction,FIREBASE_ADMIN_READ_ACTIONS} from '../public/admin-local-actions.mjs';
 const host = 'https://moakit.vercel.app';
 test('Firebase credentials, query parameters, and binary content type survive backend routing', () => {
   const request = new Request(host + '/api/test-room?callId=abc&file=1', {
@@ -32,4 +33,19 @@ test('PDF extraction stays local while all 24 existing service endpoints keep th
   assert.equal(backendRoute(new Request(host + '/api/seller/extract')).local,true);
   assert.equal(SHARED_API_PATHS.size,24);
   for (const path of SHARED_API_PATHS) assert.equal(new URL(backendRoute(new Request(host + path)).target).origin,BACKEND_ORIGIN);
+});
+
+test('Firebase-only admin reads are local, while all D1 and write actions stay on Work', () => {
+ const token='x-moakit-admin-local',url=host+'/api/admin';
+ assert.equal(FIREBASE_ADMIN_READ_ACTIONS.length,7);
+ for(const action of ['overview','members','member','memberLogs','sharedContent','session','myAccess'])
+  assert.equal(isFirebaseAdminReadAction(action),true);
+ for(const action of ['updateMember','updatePattern','deletePattern','createAdministrator','foo'])
+  assert.equal(isFirebaseAdminReadAction(action),false);
+ const local=backendRoute(new Request(url,{method:'POST',headers:{[token]:'1'}}));
+ assert.equal(local.local,true);
+ const legacy=backendRoute(new Request(url,{method:'POST'}));
+ assert.equal(legacy.target,BACKEND_ORIGIN+'/api/admin');
+ const wrongSite=backendRoute(new Request(url,{method:'POST',headers:{[token]:'1',origin:'https://bad.example'}}));
+ assert.equal(wrongSite.status,403);
 });
