@@ -59,5 +59,5 @@ test('Firebase browser inventory rules stay unchanged; trusted writes are server
  assert.match(rules,/allow update, delete: if false/);
  assert.match(rules,/allow create, update: if admin\(\) && validKitCopy\(\)/);
  const status=source('app/api/commerce-status/route.ts');
- assert.match(status,/commerceEnabled/);
+ assert.match(status,/firebaseCommerceStatus/);
 });
