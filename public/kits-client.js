@@ -1,4 +1,22 @@
+import {compressBanner,promoRequest} from './promotions-client.js';
 export const kitMoney=n=>Number(n).toLocaleString('ko-KR')+'원';
 export const kitE=s=>window.MoaUI.escapeHtml(String(s??''));
 export async function kitRequest(path='',data=null,{auth=false,timeout=45000}={}){const user=window.MoaAccount?.user,uid=user?.uid,headers={};if(auth){if(!user)throw Error('로그인 후 이용해주세요.');headers.Authorization='Bearer '+await user.getIdToken();}if(data)headers['Content-Type']='application/json';const r=await fetch('/api/kits'+path,{method:data?'POST':'GET',headers,body:data?JSON.stringify(data):undefined,signal:AbortSignal.timeout(timeout)}),d=await r.json().catch(()=>({}));if(auth&&window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');if(!r.ok)throw Object.assign(Error(d.error||'KIT 요청을 처리하지 못했어요.'),{status:r.status});return d;}
-export async function uploadKitImage(file){const user=window.MoaAccount?.user,uid=user?.uid;if(!user)throw Error('관리자 로그인이 필요합니다.');if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10485760||!file.size)throw Error('JPG·PNG·WebP, 파일당 10MB 이하로 선택해주세요.');const body=new FormData();body.set('file',file);const r=await fetch('/api/kits/image',{method:'POST',headers:{Authorization:'Bearer '+await user.getIdToken()},body,signal:AbortSignal.timeout(90000)}),d=await r.json();if(window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');if(!r.ok)throw Error(d.error||'이미지를 업로드하지 못했어요.');return d.url;}
+// New KIT images are normalized to the shared Firebase image library.
+ // Preserve a D1 registration for existing KIT image validators until that backend migrates.
+export async function uploadKitImage(file){
+  const user=window.MoaAccount?.user,uid=user?.uid;
+  if(!user)throw Error('관리자 로그인이 필요합니다.');
+  if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10485760||!file.size)
+    throw Error('JPG·PNG·WebP, 파일당 10MB 이하로 선택해주세요.');
+  const compressed=await compressBanner(file);
+  if(window.MoaAccount?.user?.uid!==uid)throw Error('관리자 로그인 계정이 변경됐습니다.');
+  const response=await promoRequest({},{
+    action:'saveImage',source:'upload',
+    title:file.name.slice(0,100),...compressed
+  },{admin:true,timeout:95000});
+  if(window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐습니다.');
+  if(!response.image?.id||!response.image?.firebaseStatus)
+    throw Error('Firebase 이미지 저장 검증이 완료되지 않았습니다.');
+  return '/api/promotions?image='+encodeURIComponent(response.image.id);
+}
