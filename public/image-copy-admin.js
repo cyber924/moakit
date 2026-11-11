@@ -1,8 +1,4 @@
-import {
-  ADMIN_EMAIL, BUCKET, IMAGE_LIMIT, MIME_EXTENSIONS, sourceImageId,
-  imageStoragePath, sourceImageUrl, storageMetadataUrl, firestoreDocumentUrl,
-  copiedFields, isMatchingCopiedDocument, sha256Hex,
-} from './image-copy-core.mjs';
+import {ADMIN_EMAIL, sourceImageId, sourceImageUrl} from './image-copy-core.mjs';
 
 // Temporary administrator migration console. Never changes the original D1 records.
 // No automatic execution: the operator explicitly starts each step.
@@ -149,86 +145,26 @@ export function mountImageCopy(target, F, navigationSignal = null) {
       state.loading = false; state.cancel = null; paint();
     }
   }
-  async function fetchSource(row, signal) {
-    const r = await fetch(sourceImageUrl(sourceImageId(row)), {signal});
-    if (!r.ok) await httpError(r, 'D1 원본 이미지 읽기 실패');
-    const mime = checkSourceType(r.headers.get('content-type'));
-    const bytes = new Uint8Array(await r.arrayBuffer());
-    if (!bytes.length || bytes.length >= IMAGE_LIMIT) throw Error('원본 이미지 용량이 200KB 이상입니다. 수동 점검이 필요합니다.');
-    return {mime,bytes,hash:await sha256Hex(bytes)};
-  }
-  async function getFirestore(id, auth, signal) {
-    const r = await fetch(firestoreDocumentUrl(id), {headers:{Authorization:'Bearer ' + auth}, signal});
-    if (r.status === 404) return null;
-    if (!r.ok) await httpError(r, 'Firestore 문서 조회 실패 (규칙 게시 확인)');
-    return responseJson(r);
-  }
-  async function getStorage(path, auth, signal) {
-    const r = await fetch(storageMetadataUrl(path), {headers:{Authorization:'Firebase ' + auth}, signal});
-    if (r.status === 404) return null;
-    if (!r.ok) await httpError(r, 'Storage 파일 조회 실패 (규칙 게시 확인)');
-    return responseJson(r);
-  }
-  async function verifyStorage(path, auth, size, hash, signal) {
-    const metadata = await getStorage(path, auth, signal);
-    if (!metadata || metadata.name !== path || Number(metadata.size) !== size) {
-      throw Error('Firebase Storage 메타데이터가 원본과 일치하지 않습니다.');
-    }
-    const r = await fetch(storageMetadataUrl(path) + '?alt=media', {
-      headers:{Authorization:'Firebase ' + auth}, signal,
-    });
-    if (!r.ok) await httpError(r, 'Storage 파일 내용 검증 실패');
-    const actual = new Uint8Array(await r.arrayBuffer());
-    if (actual.length !== size || await sha256Hex(actual) !== hash) {
-      throw Error('Firebase 저장 이미지 해시가 원본과 다릅니다. 덮어쓰지 않았습니다.');
-    }
-  }
   async function copyOne(row, signal) {
     loggedIn();
-    const id = sourceImageId(row), auth = await token();
-    // Read original first: existing records are only considered duplicates if bytes match.
-    const original = await fetchSource(row, signal);
-    const fields = copiedFields(row, original.mime, original.bytes.length, original.hash, new Date().toISOString());
-    const path = fields.storagePath.stringValue;
-    const existing = await getFirestore(id, auth, signal);
-    if (existing) {
-      if (!isMatchingCopiedDocument(existing, fields)) throw Error('동일 ID의 Firestore 정보가 달라 충돌했습니다.');
-      await verifyStorage(path, auth, original.bytes.length, original.hash, signal);
-      return 'exists';
-    }
-    const stored = await getStorage(path, auth, signal);
-    if (stored) {
-      await verifyStorage(path, auth, original.bytes.length, original.hash, signal);
-    } else {
-      const r = await fetch('https://firebasestorage.googleapis.com/v0/b/' + BUCKET +
-        '/o?uploadType=media&name=' + encodeURIComponent(path), {
-        method:'POST',
-        headers:{Authorization:'Firebase ' + auth, 'Content-Type':original.mime},
-        body:original.bytes, signal,
-      });
-      if (!r.ok) await httpError(r, 'Storage 업로드 실패 (규칙 게시 확인)');
-      await verifyStorage(path, auth, original.bytes.length, original.hash, signal);
-    }
-    // Only create a completed record after the uploaded bytes were verified.
-    const write = await fetch(firestoreDocumentUrl(id) + '?currentDocument.exists=false', {
-      method:'PATCH',
-      headers:{Authorization:'Bearer ' + auth,'Content-Type':'application/json'},
-      body:JSON.stringify({fields}), signal,
+    const r = await fetch('/api/image-copy', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + await token(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({action: 'copy', image: {
+        id: sourceImageId(row),
+        title: String(row.title || '공용 이미지').slice(0, 150),
+        createdAt: String(row.createdAt || '').slice(0, 60)
+      }}),
+      signal
     });
-    if (!write.ok) {
-      if (write.status === 409 || write.status === 412) {
-        const concurrent = await getFirestore(id, auth, signal);
-        if (isMatchingCopiedDocument(concurrent, fields)) {
-          await verifyStorage(path, auth, original.bytes.length, original.hash, signal);
-          return 'exists';
-        }
-      }
-      await httpError(write, 'Firestore 정보 저장 실패 (규칙 게시 확인)');
-    }
-    const saved = await getFirestore(id, auth, signal);
-    if (!isMatchingCopiedDocument(saved, fields)) throw Error('Firestore 저장 완료 검증에 실패했습니다.');
-    await verifyStorage(path, auth, original.bytes.length, original.hash, signal);
-    return 'copied';
+    const d = await responseJson(r);
+    if (!r.ok) throw Error((d.stage ? d.stage + ': ' : '') + (d.error || '이미지 복사 서버 호출 실패 (' + r.status + ')'));
+    if (d.status !== 'copied' && d.status !== 'exists') throw Error('복사 결과 형식이 올바르지 않습니다.');
+    loggedIn();
+    return d.status;
   }
   async function run(action) {
     if (state.working || state.loading || !state.loaded || navigationSignal?.aborted) return;

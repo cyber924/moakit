@@ -34,8 +34,14 @@ test('administrator migration is opt-in, copy-only and route-specific',()=>{
   const sections=readFileSync(new URL('../public/admin-core.mjs',import.meta.url),'utf8');
   assert.equal(ADMIN_EMAIL,'cyber924@naver.com');
   assert.ok(client.includes("action:'myAccess'"));
-  assert.ok(client.includes('verifyStorage(path'));
-  assert.ok(client.includes('currentDocument.exists=false'));
+  assert.ok(client.includes("fetch('/api/image-copy'"));
+  const server = readFileSync(new URL('../server/image-copy.mjs', import.meta.url), 'utf8');
+  const routing = readFileSync(new URL('../server/backend-routing.mjs', import.meta.url), 'utf8');
+  assert.ok(server.includes('verifyObject'));
+  assert.ok(server.includes('currentDocument.exists=false'));
+  assert.ok(routing.includes("url.pathname === '/api/image-copy'"));
+  assert.ok(!client.includes('firebasestorage.googleapis.com'));
+  assert.ok(!client.includes('firestore.googleapis.com'));
   assert.ok(client.includes('1장 시험 복사'));
   assert.ok(client.includes('failed'));
   assert.ok(!client.includes('method:\'DELETE\''));

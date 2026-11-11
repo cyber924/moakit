@@ -15,7 +15,7 @@ import {mountModeration} from './market.js';
 import {mountTester} from './tester.js';
 const UI=window.MoaUI,E=UI.escapeHtml;
 const root=document.createElement('main');root.id='admin-root';root.hidden=true;document.querySelector('footer').before(root);
-const style=document.createElement('link');style.rel='stylesheet';style.href='/admin.css?v=admins-image-copy-1';document.head.append(style);
+const style=document.createElement('link');style.rel='stylesheet';style.href='/admin.css?v=admins-image-copy-2';document.head.append(style);
 let context=null,epoch=0,currentKey='',controller=null,loadedUid=null;
 let members=[],member=null,version='',fullyLoaded=false,loading=false,loadError='',permissionFailure=false;
 let filters={query:'',role:'all',status:'all',sort:'newest'},page=1;
