@@ -1,4 +1,4 @@
-import {mirrorTestOrder,orderFromPattern} from './finance-firestore.mjs';
+import {mirrorTestOrder,orderFromPattern,testOrders} from './finance-firestore.mjs';
 const E=window.MoaUI.escapeHtml;
 async function shop(action,values={},blob=false){
  const user=window.MoaAccount?.user;if(!user)throw Error('로그인 후 이용해주세요.');const uid=user.uid;
@@ -23,5 +23,19 @@ export function mountPurchaseBox(slot,id){
 export async function mountLibrary(){
  const root=document.getElementById('purchase-library');if(!root)return;const uid=window.MoaAccount?.user?.uid;root.innerHTML='<p role="status">구매 내역을 불러오고 있어요.</p>';
  try{let pageToken='',rows=[];do{const d=await shop('library',{pageToken});rows.push(...d.purchases);pageToken=d.nextPageToken||'';}while(pageToken);if(!root.isConnected||window.MoaAccount?.user?.uid!==uid)return;rows.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));root.innerHTML=rows.length?`<p class="member-intro">${rows.length}개의 도안 · 결제 승인 대기 없이 바로 다운로드할 수 있어요.</p><div class="shop-library">${rows.map(p=>`<article><span class="market-detail-label">${p.refunded?'전액 환불':p.refund?'부분 환불':'테스트 구매'} · 청구 없음</span><h2>${E(p.title)}</h2><p>by ${E(p.sellerName)} · ${E(new Date(p.createdAt).toLocaleDateString('ko-KR'))}</p><small>상품 표시 가격 ${Number(p.amount).toLocaleString('ko-KR')}원 · 실제 결제 0원${p.refund?' · 환불 기록 '+Number(p.refund).toLocaleString('ko-KR')+'원':''}${p.orderNumber?' · '+E(p.orderNumber):''}</small><div><button class="seller-button primary" data-download-pattern="${E(p.patternId)}" ${p.refunded?'disabled':''}>${p.refunded?'전액 환불 · 다운로드 종료':'PDF 다운로드'}</button><a class="seller-button" href="#product/${E(p.patternId)}">도안 상세</a></div></article>`).join('')}</div>`:'<div class="member-empty"><h3>아직 구매한 도안이 없어요.</h3><p>마음에 드는 도안을 찾아 구매해보세요.</p><a class="seller-button" href="#patterns">도안 둘러보기 ↗</a></div>';root.querySelectorAll('[data-download-pattern]').forEach(b=>b.onclick=()=>downloadPattern(b.dataset.downloadPattern,b));if(rows.length){const sync=document.createElement('button');sync.type='button';sync.className='seller-button';sync.textContent='기존 구매 내역 Firebase 동기화';const note=document.createElement('p');note.setAttribute('role','status');root.append(sync,note);sync.onclick=async()=>{sync.disabled=true;let count=0,fail=0;note.textContent='Firebase 구매 기록을 확인하고 있습니다…';for(const p of rows){try{await mirrorTestOrder('pattern',orderFromPattern(p));count++;}catch(e){fail++;console.warn('PURCHASE_MIRROR_FAILED',String(e.message||e));}}note.textContent='Firebase 기록 '+count+'건 확인'+(fail?' · 실패 '+fail+'건 (규칙 및 로그인 확인)':' · 완료');sync.disabled=false;};}}
- catch(e){if(root.isConnected){root.innerHTML=`<p role="alert">${E(e.message)}</p><button class="seller-button" data-library-retry>다시 불러오기</button>`;root.querySelector('button').onclick=mountLibrary;}}
+ catch(e){
+  if(!root.isConnected||window.MoaAccount?.user?.uid!==uid)return;
+  try{
+   const records=(await testOrders({role:'buyer'})).filter(x=>x.kind==='pattern'&&x.mode==='test');
+   if(!root.isConnected||window.MoaAccount?.user?.uid!==uid)return;
+   if(records.length){
+    records.sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+    root.innerHTML='<div class="member-notice">기존 Work PDF 다운로드 서버에 연결할 수 없어 Firebase에 보존된 구매 기록만 표시합니다. 구매내역과 도안 데이터는 삭제되지 않았으며, PDF 다운로드는 기존 서버 복구 또는 별도 권한 이전 후 이용할 수 있습니다.</div>'+
+      '<div class="shop-library">'+records.map(p=>'<article><span class="market-detail-label">Firebase 테스트 구매 기록 · 실제 청구 0원</span><h2>'+E(p.title)+'</h2><p>by '+E(p.sellerName)+' · '+E(String(p.createdAt).slice(0,10))+'</p><small>표시금액 '+Number(p.amount||0).toLocaleString('ko-KR')+'원 · 실제 청구 0원</small><div><a class="seller-button" href="#product/'+E(p.productId)+'">도안 상세</a></div></article>').join('')+'</div><button class="seller-button" data-library-retry>기존 다운로드 서버 다시 연결</button>';
+    root.querySelector('[data-library-retry]').onclick=mountLibrary;return;
+   }
+  }catch(fallbackError){console.warn('FIREBASE_PURCHASE_READ_FALLBACK',String(fallbackError.message||fallbackError));}
+  root.innerHTML=`<p role="alert">${E(e.message)}</p><button class="seller-button" data-library-retry>다시 불러오기</button>`;
+  root.querySelector('button').onclick=mountLibrary;
+ }
 }

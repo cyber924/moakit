@@ -1,0 +1,32 @@
+// Firebase Firestore 기존 service cloud.firestore -> match /databases/{database}/documents 내부에만 붙여넣으세요.
+// 기존 규칙 전체를 덮어쓰지 마세요. KIT 상품 사본용 추가 블록입니다.
+// Imported KIT product catalog. D1 remains authoritative for stock/order
+    // processing until the new checkout is independently verified.
+    match /moakitKits/{kitId} {
+      function validKitCopy() {
+        let d = request.resource.data;
+        return kitId.matches('[A-Za-z0-9_-]{1,100}')
+          && d.keys().hasAll([
+            'id','status','stock','version','price','shippingFee',
+            'createdAt','updatedAt','dataJson','source','syncedAt'
+          ])
+          && d.keys().hasOnly([
+            'id','status','stock','version','price','shippingFee',
+            'createdAt','updatedAt','dataJson','source','syncedAt'
+          ])
+          && d.id == kitId
+          && d.status in ['published','draft','suspended','deleted']
+          && d.stock is int && d.stock >= 0 && d.stock <= 100000
+          && d.version is int && d.version >= 1
+          && d.price is int && d.price >= 0 && d.price <= 100000000
+          && d.shippingFee is int && d.shippingFee >= 0 && d.shippingFee <= 100000000
+          && d.createdAt is string && d.createdAt.size() <= 60
+          && d.updatedAt is string && d.updatedAt.size() <= 60
+          && d.dataJson is string && d.dataJson.size() <= 750000
+          && d.source == 'work-d1'
+          && d.syncedAt is string && d.syncedAt.size() <= 60;
+      }
+      allow get, list: if admin() || resource.data.status == 'published';
+      allow create, update: if admin() && validKitCopy();
+      allow delete: if false;
+    }

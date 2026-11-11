@@ -1,7 +1,34 @@
 import {compressBanner,promoRequest} from './promotions-client.js';
+import {firebaseKitReadFallback} from './kit-firebase-catalog.mjs';
 export const kitMoney=n=>Number(n).toLocaleString('ko-KR')+'원';
 export const kitE=s=>window.MoaUI.escapeHtml(String(s??''));
-export async function kitRequest(path='',data=null,{auth=false,timeout=45000}={}){const user=window.MoaAccount?.user,uid=user?.uid,headers={};if(auth){if(!user)throw Error('로그인 후 이용해주세요.');headers.Authorization='Bearer '+await user.getIdToken();}if(data)headers['Content-Type']='application/json';const r=await fetch('/api/kits'+path,{method:data?'POST':'GET',headers,body:data?JSON.stringify(data):undefined,signal:AbortSignal.timeout(timeout)}),d=await r.json().catch(()=>({}));if(auth&&window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');if(!r.ok)throw Object.assign(Error(d.error||'KIT 요청을 처리하지 못했어요.'),{status:r.status});return d;}
+let noticeShown=false;
+export async function kitRequest(path='',data=null,{auth=false,timeout=45000}={}){
+ const user=window.MoaAccount?.user,uid=user?.uid,headers={};
+ if(auth){if(!user)throw Error('로그인 후 이용해주세요.');headers.Authorization='Bearer '+await user.getIdToken();}
+ if(data)headers['Content-Type']='application/json';
+ const canFallback=!data&&!auth;
+ const fallback=async()=>{
+  const kit=await firebaseKitReadFallback(path);
+  if(!noticeShown){noticeShown=true;window.MoaUI?.toast?.('현재 Firebase 상품목록은 열람만 가능합니다. KIT 신규 주문은 기존 서버 연결 후 이용해주세요.');}
+  return kit;
+ };
+ let r;
+ try{
+  r=await fetch('/api/kits'+path,{method:data?'POST':'GET',headers,
+   body:data?JSON.stringify(data):undefined,signal:AbortSignal.timeout(timeout)});
+ }catch(error){
+  if(canFallback){try{return await fallback();}catch{}}
+  throw error;
+ }
+ const d=await r.json().catch(()=>({}));
+ if(auth&&window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');
+ if(!r.ok){
+  if(canFallback&&r.status>=500){try{return await fallback();}catch{}}
+  throw Object.assign(Error(d.error||'KIT 요청을 처리하지 못했어요.'),{status:r.status});
+ }
+ return d;
+}
 // New KIT images are normalized to the shared Firebase image library.
  // Preserve a D1 registration for existing KIT image validators until that backend migrates.
 export async function uploadKitImage(file){
