@@ -1,5 +1,6 @@
 import {encodeFields,decodeDocument} from './member-core.mjs';
 import {kitRequest} from './kits-client.js';
+import {commerceMode} from './commerce-switch.mjs';
 
 const ROOT='https://firestore.googleapis.com/v1/projects/studio-1613487721-b043c/databases/(default)/documents/moakitKits';
 const ID=/^[A-Za-z0-9_-]{1,100}$/;
@@ -52,7 +53,7 @@ export async function loadLegacyKitCatalog(onProgress=()=>{}){
  const all=[];let page=1,expected=1;
  do{
   onProgress('Work KIT 목록 '+page+'페이지 조회');
-  const data=await kitRequest('?'+new URLSearchParams({admin:'1',page:String(page),state:'all'}),null,{auth:true});
+  const data=await kitRequest('?'+new URLSearchParams({admin:'1',page:String(page),state:'all'}),null,{auth:true,legacy:true});
   if(!Array.isArray(data.kits)||!Number.isInteger(data.pages)||data.pages<1)throw Error('기존 KIT 상품 목록 형식이 올바르지 않습니다.');
   all.push(...data.kits);expected=data.pages;
   if(expected>100)throw Error('KIT 상품이 2,000개를 넘습니다. 분할 이전이 필요합니다.');
@@ -93,6 +94,7 @@ export async function auditFirebaseKits(onProgress=()=>{}){
 // Migrates KIT catalog data only. Orders and stock remain D1 authoritative
 // until a separately verified, atomic checkout implementation is enabled.
 export async function migrateFirebaseKits(onProgress=()=>{}){
+ if(await commerceMode()==='firebase')throw Error('Firebase 주문 운영 전환 후에는 구 Work/D1 상품으로 덮어쓸 수 없습니다.');
  const legacy=await loadLegacyKitCatalog(onProgress);
  if(!legacy.length)throw Error('원본 KIT 상품이 0건입니다. 데이터를 생성하지 않고 중단했습니다.');
  const stats={created:0,updated:0,unchanged:0,failed:0,errors:[],sourceCount:legacy.length};

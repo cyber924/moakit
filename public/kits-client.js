@@ -1,13 +1,16 @@
 import {compressBanner,promoRequest} from './promotions-client.js';
 import {firebaseKitReadFallback} from './kit-firebase-catalog.mjs';
+import {commerceMode} from './commerce-switch.mjs';
 export const kitMoney=n=>Number(n).toLocaleString('ko-KR')+'원';
 export const kitE=s=>window.MoaUI.escapeHtml(String(s??''));
 let noticeShown=false;
-export async function kitRequest(path='',data=null,{auth=false,timeout=45000}={}){
+export async function kitRequest(path='',data=null,{auth=false,timeout=45000,legacy=false}={}){
  const user=window.MoaAccount?.user,uid=user?.uid,headers={};
  if(auth){if(!user)throw Error('로그인 후 이용해주세요.');headers.Authorization='Bearer '+await user.getIdToken();}
  if(data)headers['Content-Type']='application/json';
- const canFallback=!data&&!auth;
+ const usingFirebase=!legacy&&(await commerceMode()==='firebase')&&!(data&&['recommend','suggest'].includes(data.action));
+ if(usingFirebase)headers['X-MOAKIT-FIREBASE-COMMERCE']='1';
+ const canFallback=!data&&!auth&&!usingFirebase;
  const fallback=async()=>{
   const kit=await firebaseKitReadFallback(path);
   if(!noticeShown){noticeShown=true;window.MoaUI?.toast?.('현재 Firebase 상품목록은 열람만 가능합니다. KIT 신규 주문은 기존 서버 연결 후 이용해주세요.');}

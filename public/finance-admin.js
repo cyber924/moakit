@@ -1,19 +1,20 @@
 import {mountKitOrders} from './kit-orders.js';
 import {csvText} from './finance-export.mjs';
 import {mountFirebaseFinanceAdmin} from './finance-firestore-admin.js?v=orders-migration-1';
+import {commerceMode} from './commerce-switch.mjs';
 const E=s=>window.MoaUI.escapeHtml(String(s??'')),money=n=>n==null?'미설정':Number(n).toLocaleString('ko-KR')+'원';
 const date=v=>new Date(v).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}),today=()=>new Date(Date.now()+9*3600000).toISOString().slice(0,10);
 const status={review:'검토 중',confirmed:'확정',paid:'지급 완료',void:'검토 취소'},kindName=k=>k==='kit'?'KIT':'도안';
 const button=(label,attr='',primary=false)=>`<button type="button" class="admin-button ${primary?'primary':''}" ${attr}>${label}</button>`;
 function download(name,rows){const url=URL.createObjectURL(new Blob([csvText(rows)],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 export function mountFinanceAdmin(target,section='sales',options={}){
- const uid=window.MoaAccount?.user?.uid;let epoch=0,busy=false,currentTab=options.orders?'kit-orders':section==='sales'?'all':'authors',from=today().slice(0,7)+'-01',to=today(),mode='test',query='',sellerUid='',page=1,data=null;
+ const uid=window.MoaAccount?.user?.uid;let epoch=0,busy=false,initialModeChecked=false,currentTab=options.orders?'kit-orders':section==='sales'?'all':'authors',from=today().slice(0,7)+'-01',to=today(),mode='test',query='',sellerUid='',page=1,data=null;
  const live=()=>target.isConnected&&window.MoaAccount?.user?.uid===uid;
  async function api(action,values={}){const u=window.MoaAccount?.user;if(!u||u.uid!==uid)throw Error('관리자 계정이 변경됐습니다.');const token=await u.getIdToken(),r=await fetch('/api/finance',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({action,...values}),signal:AbortSignal.timeout(90000)});const d=await r.json();if(!live())throw Error('관리자 계정이 변경됐습니다.');if(!r.ok)throw Error(d.error||'판매·정산 요청에 실패했습니다.');return d;}
  const criteria=()=>({from,to,mode,kind:section==='sales'&&['pattern','kit'].includes(currentTab)?currentTab:'all',query,sellerUid,page});
  function frame(){const tabs=section==='sales'?[['all','전체 매출'],['pattern','도안 판매'],['kit','KIT 판매'],['kit-orders','KIT 주문·배송'],['firebase','Firebase 통합']]:[['authors','작가별 정산'],['batches','정산 내역'],['terms','배분 기준 70:30'],['audit','처리 기록'],['firebase','Firebase 통합']];target.innerHTML=`<div class="admin-heading"><span>${section==='sales'?'SALES & REVENUE':'CREATOR SETTLEMENT'}</span><h1>${section==='sales'?'판매 관리':'정산 관리'}</h1><p>${section==='sales'?'도안과 KIT 판매를 구분하고 주문·환불·순매출을 확인합니다.':'작가별 배분 조건과 지급 명세를 검토하고 지급 기록을 보관합니다.'}</p></div><nav class="finance-tabs" aria-label="${section==='sales'?'판매':'정산'} 메뉴">${tabs.map(([id,label])=>button(label,`data-tab="${id}" aria-pressed="${id===currentTab}"`)).join('')}</nav><div class="finance-toolbar">${button('주문 내역 동기화','data-sync')}${button('저장 결과 새로고침','data-refresh')}<span data-sync-status role="status"></span></div><div data-finance-main></div><div data-finance-panel></div>`;target.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{if(busy)return;currentTab=b.dataset.tab;page=1;load();});target.querySelector('[data-refresh]').onclick=()=>load();target.querySelector('[data-sync]').onclick=sync;
  }
- async function load(){const mine=++epoch;frame();const body=target.querySelector('[data-finance-main]');body.innerHTML='<p class="admin-loading" role="status">저장된 판매·정산 결과를 불러오고 있습니다.</p>';try{
+ async function load(){const mine=++epoch;if(!initialModeChecked&&!options.orders){initialModeChecked=true;if(await commerceMode()==='firebase')currentTab='firebase';}frame();const body=target.querySelector('[data-finance-main]');body.innerHTML='<p class="admin-loading" role="status">저장된 판매·정산 결과를 불러오고 있습니다.</p>';try{
  if(currentTab==='firebase'){await mountFirebaseFinanceAdmin(body,{legacyApi:api,criteria});return;}
  if(section==='sales'&&currentTab==='kit-orders'){mountKitOrders(body,{admin:true});return;}
  if(currentTab==='terms'){const d=await api('terms');if(live()&&mine===epoch)terms(body,d.terms);return;}

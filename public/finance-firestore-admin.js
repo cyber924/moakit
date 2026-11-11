@@ -4,6 +4,7 @@ import {
  importLegacyPatternOrders,importOrdersFromVerifiedSales,listLegacyPurchasePage
 } from './finance-firestore.mjs?v=orders-migration-1';
 import {tallyOrderMatches} from './order-migration-core.mjs';
+import {commerceMode} from './commerce-switch.mjs';
 import {reconcileTestFinance} from './finance-reconciliation-core.mjs';
 
 const E=s=>String(s??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
@@ -61,9 +62,9 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
    '<h3>구매 기록 · 미검증 테스트 원장</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>상품</th><th>구매자</th><th>표시금액</th><th>상태</th><th>작업</th></tr></thead><tbody>'+
    orders.slice(0,100).map(o=>'<tr><td>'+E(o.title)+'<small>'+E(o.kind==='kit'?'KIT':'도안')+' · '+E(o.sourceOrderId)+'</small></td><td>'+E(o.buyerUid)+'</td><td>'+W(o.amount)+'</td><td>검증 전 · 실제 청구 0원</td><td><button type="button" class="admin-button" data-verify-order="'+E(o.id)+'" '+(sales.some(s=>s.orderId===o.id||s.sourceOrderId===o.sourceOrderId)?'disabled':'')+'>원본 대조</button></td></tr>').join('')+
    (orders.length?'':'<tr><td colspan="5">아직 Firebase로 복사한 구매 기록이 없습니다.</td></tr>')+
-   '</tbody></table></div><h3>검증·이전된 테스트 판매</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>작가</th><th>상품</th><th>표시금액</th><th>작가 몫</th><th>상태</th></tr></thead><tbody>'+
-   sales.slice(0,100).map(s=>'<tr><td>'+E(s.sellerName||s.sellerUid)+'</td><td>'+E(s.title)+'</td><td>'+W(s.amount)+'</td><td>'+W(s.sellerShare)+(s.roundingCorrection?'<small>정수 계산으로 1원 보정</small>':'')+'</td><td>'+E(claimedIds.has(s._docId||s.orderId)?'기존 정산서 연결됨':blockedIds.has(s._docId||s.orderId)?'D1 원본 대조 보류':s.status==='settled-in-work'?'기존 정산 포함':s.status)+'</td></tr>').join('')+
-   (sales.length?'':'<tr><td colspan="5">아직 검증된 판매가 없습니다.</td></tr>')+
+   '</tbody></table></div><h3>검증·이전된 테스트 판매</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>작가</th><th>상품</th><th>표시금액</th><th>작가 몫</th><th>상태</th><th>관리</th></tr></thead><tbody>'+
+   sales.slice(0,100).map(s=>'<tr><td>'+E(s.sellerName||s.sellerUid)+'</td><td>'+E(s.title)+'</td><td>'+W(s.amount)+'</td><td>'+W(s.sellerShare)+(s.roundingCorrection?'<small>정수 계산으로 1원 보정</small>':'')+'</td><td>'+E(claimedIds.has(s._docId||s.orderId)?'기존 정산서 연결됨':blockedIds.has(s._docId||s.orderId)?'D1 원본 대조 보류':s.status==='settled-in-work'?'기존 정산 포함':s.status)+'</td><td>'+(s.verifiedSource==='firebase-transaction'&&s.kind==='pattern'&&s.status==='reviewed'&&!claimedIds.has(s._docId||s.orderId)?'<button type="button" class="admin-button" data-refund-pattern="'+E(s.productId)+'" data-buyer="'+E(s.buyerUid)+'">테스트 구매 취소</button>':'—')+'</td></tr>').join('')+
+   (sales.length?'':'<tr><td colspan="6">아직 검증된 판매가 없습니다.</td></tr>')+
    '</tbody></table></div>'+
    '<h3>정산 검토 (테스트 전용)</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead><tr><th>작가</th><th>미정산 건</th><th>테스트 지급 예정액</th><th>작업</th></tr></thead><tbody>'+
    Object.entries(grouped).map(([uid,rows])=>'<tr><td>'+E(rows[0].sellerName||uid)+'</td><td>'+rows.length+'건</td><td>'+W(rows.reduce((n,s)=>n+Number(s.sellerShare||0),0))+'</td><td><button type="button" class="admin-button" data-create-settlement="'+E(uid)+'">테스트 정산 검토서 생성</button></td></tr>').join('')+
@@ -79,6 +80,17 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
    if(!order)throw Error('구매 기록을 찾지 못했습니다.');
    await confirmTestSale(order);
    return '기존 구매 원본 대조 및 Firebase 판매 기록 완료';
+  }));
+  target.querySelectorAll('[data-refund-pattern]').forEach(b=>b.onclick=()=>run(async()=>{
+   if(await commerceMode()!=='firebase')throw Error('Firebase 독립 거래가 활성화되어야 합니다.');
+   const account=window.MoaAccount?.user;if(!account)throw Error('관리자 로그인이 필요합니다.');
+   const r=await fetch('/api/shop',{method:'POST',headers:{Authorization:'Bearer '+await account.getIdToken(),
+     'Content-Type':'application/json','X-MOAKIT-FIREBASE-COMMERCE':'1'},
+     body:JSON.stringify({action:'refund',id:b.dataset.refundPattern,buyerUid:b.dataset.buyer}),
+     signal:AbortSignal.timeout(35000)});
+   const d=await r.json().catch(()=>({}));
+   if(!r.ok)throw Error(d.error||'테스트 구매 취소 실패');
+   return 'Firebase 테스트 도안 구매 취소 완료 · 실제 환불·송금 없음';
   }));
   target.querySelectorAll('[data-create-settlement]').forEach(b=>b.onclick=()=>run(async()=>{
    const uid=b.dataset.createSettlement,rows=grouped[uid]||[];
