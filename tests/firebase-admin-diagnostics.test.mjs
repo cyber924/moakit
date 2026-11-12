@@ -44,7 +44,7 @@ test('Cloud Functions route requires staging, admin and independent non-public f
  const route=readFileSync(new URL('../app/api/commerce-diagnostics/route.ts',import.meta.url),'utf8');
  const proxy=readFileSync(new URL('../lib/firebase-commerce-proxy.ts',import.meta.url),'utf8');
  assert.match(fn,/resource==='diagnostics'/);
- assert.match(fn,/diagnostic:true/);
+ assert.match(diagnostic,/diagnostic:true/);
  assert.match(diagnostic,/await adminSession\(req\)/);
  assert.match(diagnostic,/await active\(\)/);
  assert.match(diagnostic,/status:'diagnostic'/);
