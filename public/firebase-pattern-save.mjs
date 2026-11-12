@@ -86,12 +86,13 @@ export async function savePatternToFirebase(F,d,{fetcher=fetch}={}){
    const old=decodeDocument(listing);
    if(old.sellerUid!==uid||old.sourceId!==draft.id||old.status==='suspended')
     throw error('관리자에 의해 판매 중지된 도안은 수정할 수 없습니다.',403);
-   // Preserve already-created downloadable grants for old Work purchases.
-   if(!draft.downloadGrant){
-    try{const p=JSON.parse(old.content);
-     if(p.downloadGrant)draft={...draft,downloadGrant:p.downloadGrant};
-    }catch{}
-   }
+   // Work-free merchandising lives in the public Firestore document.
+   // A seller updating an image or a description must not erase admin settings.
+   try{
+    const previous=JSON.parse(old.content||'{}');
+    const retained=['popular','recommended','weeklyBest','rank','weeklyStart','weeklyEnd','downloadGrant'];
+    draft={...draft,...Object.fromEntries(retained.filter(k=>previous[k]!==undefined).map(k=>[k,previous[k]]))};
+   }catch{throw error('기존 공개 도안 정보를 확인할 수 없습니다.',409);}
   }
  }
  if(uid!==F.user?.uid)throw error('로그인 계정이 변경됐습니다.',401);
