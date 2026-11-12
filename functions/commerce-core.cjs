@@ -24,14 +24,19 @@ function itemIds(lines){
   throw fail('KIT와 수량을 확인해주세요.');
  return [...new Set(lines.map(line=>line.id))];
 }
+// A KIT is available until the administrator explicitly marks it sold out.
+// Existing records without this field retain their previous zero-stock state.
+function kitSoldOut(kit){
+ return typeof kit.soldOut==='boolean'?kit.soldOut:kit.stock===0;
+}
 function kitQuote(lines,kits,{preview=false,diagnostic=false}={}){
  const ids=itemIds(lines),byId=new Map(kits.map(x=>[x.id,x]));
  if(ids.length!==byId.size)throw fail('상품 목록이 일치하지 않습니다.',409);
  const quantities=Object.fromEntries(ids.map(id=>[id,0]));
  const items=lines.map(line=>{
   const kit=byId.get(line.id);
-  if(!kit||!(kit.status==='published'||diagnostic&&kit.status==='diagnostic'&&kit.id.startsWith('diag_')))throw fail('판매 중인 KIT가 아닙니다.',409);
-  if(!Number.isSafeInteger(kit.stock)||kit.stock<0||!Number.isSafeInteger(kit.version))throw fail('KIT 재고 정보 오류',409);
+  if(!kit||!(kit.status==='published'||diagnostic&&kit.status==='diagnostic'&&kit.id.startsWith('diag_'))||kitSoldOut(kit))throw fail('품절 또는 판매 중지된 KIT입니다.',409);
+  if(!Number.isSafeInteger(kit.version))throw fail('KIT 상품 버전 정보 오류',409);
   if(!preview&&line.version!==kit.version)throw fail('상품 정보가 변경됐습니다. 다시 확인해주세요.',409);
   const data=kit.data,extraIDs=line.extras;
   if(!Array.isArray(extraIDs)||new Set(extraIDs).size!==extraIDs.length||
@@ -45,8 +50,8 @@ function kitQuote(lines,kits,{preview=false,diagnostic=false}={}){
    size:line.size,color:line.color,extras,unitPrice,subtotal,version:kit.version,
    financeSellerUid:data.payoutSellerUid||'__platform__',financeSellerName:data.payoutSellerName||'모아키트'};
  });
- for(const id of ids)if(quantities[id]>20||quantities[id]>byId.get(id).stock)
-  throw fail('KIT 재고가 부족합니다.',409);
+ for(const id of ids)if(quantities[id]>20)
+  throw fail('같은 KIT의 주문 수량은 최대 20개입니다.',409);
  const shippingFee=Math.max(...kits.map(x=>x.data.shippingFee||0));
  const total=items.reduce((n,x)=>n+x.subtotal,shippingFee);
  if(!amount(total))throw fail('주문 금액을 확인해주세요.');
@@ -74,4 +79,4 @@ function isTrustedPatternSale(sale,uid,id){
   &&['firebase-transaction','legacy-d1-finance','legacy-pattern-purchase'].includes(sale.verifiedSource)
   &&['reviewed','settled-in-work'].includes(sale.status);
 }
-module.exports={fail,validId,amount,revenue7030,shippingInput,itemIds,kitQuote,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale};
+module.exports={fail,validId,amount,revenue7030,shippingInput,itemIds,kitSoldOut,kitQuote,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale};
