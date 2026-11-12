@@ -5,7 +5,8 @@ export const FIREBASE_ADMIN_READ_ACTIONS = Object.freeze([
 // These writes are already implemented against Firebase Auth/Firestore by the
 // local admin API; they no longer require a Work D1 hop.
 export const FIREBASE_ADMIN_WRITE_ACTIONS = Object.freeze([
- 'updateMember','updateTesterContent','createAdministrator','setAdministrator','updatePattern'
+ 'updateMember','updateTesterContent','createAdministrator','setAdministrator','updatePattern',
+ 'patternDetail','patterns','deletePattern','suggestPattern','recommendPatternFields'
 ]);
 const reads=new Set(FIREBASE_ADMIN_READ_ACTIONS);
 const all=new Set([...FIREBASE_ADMIN_READ_ACTIONS,...FIREBASE_ADMIN_WRITE_ACTIONS]);
