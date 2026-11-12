@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - firebase-commerce-hardening-20261112
+      - firebase-diagnostic-transactions-20261112
   pull_request:
     branches:
       - main
@@ -23,8 +24,10 @@ jobs:
         run: |
           node --check functions/index.cjs
           node --check functions/commerce-core.cjs
+          node --check functions/commerce-diagnostics.cjs
+          node --check public/firebase-commerce-diagnostics-admin.mjs
           node --check tests/firebase-emulator-commerce.cjs
-          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs
+          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs tests/firebase-admin-diagnostics.test.mjs
       - name: Install backend dependencies and verify entry point
         run: |
           npm --prefix functions install --ignore-scripts --no-audit --no-fund

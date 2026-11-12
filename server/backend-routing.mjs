@@ -24,7 +24,7 @@ export function backendRoute(request) {
   // Firebase transactions are opt-in. Until service credentials and the
   // production cutover flag are configured, legacy Work routes stay intact.
   if (['/api/shop','/api/kits/orders','/api/kits'].includes(url.pathname) && request.headers.get('x-moakit-firebase-commerce') === '1') return { local: true };
-  if (url.pathname === '/api/commerce-status' || url.pathname === '/api/commerce-health' || url.pathname === '/api/commerce-finance') return { local: true };
+  if (url.pathname === '/api/commerce-status' || url.pathname === '/api/commerce-health' || url.pathname === '/api/commerce-finance' || url.pathname === '/api/commerce-diagnostics') return { local: true };
   if (url.pathname === '/api/seller/extract' || url.pathname === '/api/image-copy' || url.pathname === '/api/image-assets' || url.pathname === '/api/kit-sample' || url.pathname === '/api/kit-sample-copy' || url.pathname === '/api/site-asset' || url.pathname === '/api/site-asset-copy') return { local: true };
   if (url.pathname === '/api/promotions' && request.method === 'GET' && url.searchParams.has('image')) return { local: true };
   if (!SHARED_API_PATHS.has(url.pathname)) return { status: 404, error: '요청한 기능을 찾을 수 없습니다.' };

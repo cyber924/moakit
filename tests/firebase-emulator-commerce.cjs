@@ -139,6 +139,28 @@ async function run(){
  assert.equal(duplicate.status,409);
  const claimedRefund=await api('pattern','refund',{id:prod2.id,buyerUid:buyer.uid},admin.token);
  assert.equal(claimedRefund.status,409);
- console.log('EMULATOR E2E PASS: KIT checkout, idempotency, inventory restore, concurrent stock, pattern PDF, refund, 70:30 settlement and double claim');
+ // Switch off only the disposable emulator setting, never the production flag.
+ await db.doc('moakitSettings/commerce').set({firebaseEnabled:false,schemaVersion:1});
+ for(const suite of ['kit','pattern']){
+  const r=await fetch(host+'diagnostics',{method:'POST',
+   headers:{Authorization:'Bearer '+admin.token,'Content-Type':'application/json','x-moakit-staging':'1'},
+   body:JSON.stringify({action:'run',suite})});
+  const result=await r.json();
+  assert.equal(r.status,200,JSON.stringify(result));
+  assert.equal(result.ok,true);
+  assert.equal(result.cleanup,true);
+  assert.equal(result.checkoutActivated,false);
+  assert.equal(result.charged,0);
+  assert.ok(result.checks.every(x=>x.passed===true),JSON.stringify(result.checks));
+ }
+ const remainingKits=await db.collection('moakitKits').where('status','==','diagnostic').get();
+ const remainingPatterns=await db.collection('moakitPatterns').where('status','==','diagnostic').get();
+ assert.equal(remainingKits.size,0,'diagnostic KIT leftovers');
+ assert.equal(remainingPatterns.size,0,'diagnostic pattern leftovers');
+ const forbidden=await fetch(host+'diagnostics',{method:'POST',
+  headers:{Authorization:'Bearer '+buyer.token,'Content-Type':'application/json','x-moakit-staging':'1'},
+  body:JSON.stringify({action:'run',suite:'kit'})});
+ assert.equal(forbidden.status,403,'non-admin diagnostic must be denied');
+  console.log('EMULATOR E2E PASS: KIT checkout, idempotency, inventory restore, concurrent stock, pattern PDF, refund, 70:30 settlement and double claim');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});
