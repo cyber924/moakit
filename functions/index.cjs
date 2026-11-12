@@ -76,7 +76,7 @@ async function healthRoute(req,res){
  await adminSession(req);
  const checks={firebase:true,firestore:false,storage:false,kits:false};
  await ref('moakitSettings','commerce').get();checks.firestore=true;
- await bucket.getMetadata();checks.storage=true;
+ try{await bucket.getMetadata();checks.storage=true;}catch(e){checks.storage=false;}
  const kits=await db.collection(collections.kits).limit(8).get();
  checks.kits=kits.size>=6;
  json(res,{...checks,ready:checks.firestore&&checks.storage&&checks.kits,
@@ -525,6 +525,9 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   throw fail('요청한 기능을 찾지 못했습니다.',404);
  }catch(e){
   const status=Number.isInteger(e?.status)&&e.status>=400&&e.status<600?e.status:502;
+  // Detailed stack traces are only emitted inside disposable local emulators.
+  if(process.env.FUNCTIONS_EMULATOR==='true')console.error('MOAKIT_EMULATOR_ERROR',e?.stack||e);
+  else if(status>=500)console.error('MOAKIT_COMMERCE_ERROR',{name:String(e?.name||'Error'),code:String(e?.code||'UNKNOWN'),resource:String(req.query?.resource||'')});
   if(!res.headersSent)json(res,{error:status===502?'Firebase 거래 요청을 처리하지 못했습니다.':e.message},status);
   else res.destroy(e);
  }
