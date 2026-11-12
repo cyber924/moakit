@@ -168,6 +168,16 @@ async function run(){
   headers:{Authorization:'Bearer '+buyer.token,'Content-Type':'application/json','x-moakit-staging':'1'},
   body:JSON.stringify({action:'run',suite:'kit'})});
  assert.equal(forbidden.status,403,'non-admin diagnostic must be denied');
+ const buyerSwitch=await api('cutover','enable',{confirmation:'FIREBASE'},buyer.token);
+ assert.equal(buyerSwitch.status,403,'buyer must not change global commerce route');
+ const adminSwitch=await api('cutover','enable',{confirmation:'FIREBASE'},admin.token);
+ assert.equal(adminSwitch.status,200,JSON.stringify(adminSwitch.data));
+ assert.equal(adminSwitch.data.active,true);
+ assert.equal((await api('status')).data.active,true);
+ const returnToLegacy=await api('cutover','disable',{confirmation:'WORK'},admin.token);
+ assert.equal(returnToLegacy.status,200,JSON.stringify(returnToLegacy.data));
+ assert.equal((await api('status')).data.active,false);
+
   console.log('EMULATOR E2E PASS: KIT salesCount, sold-out gate, frozen Firebase Storage PDF paths, refunds, 70:30 settlements');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});
