@@ -103,6 +103,42 @@ async function run(){
  await db.doc('moakitKits/'+kit).update({soldOut:true});
  const unavailable=await api('orders','checkout',{...one,checkoutKey:uuid()},buyer.token);
  assert.equal(unavailable.status,409,'admin soldOut stops new orders');
+ // Real Firebase Security Rules + browser-style Firestore commit test for
+ // draft -> public pattern -> buyer download, without the Work D1 server.
+ const {savePatternToFirebase}=await import('../public/firebase-pattern-save.mjs');
+ const restFetch=(url,init)=>fetch(String(url).replace(
+  'https://firestore.googleapis.com','http://'+process.env.FIRESTORE_EMULATOR_HOST),init);
+ await db.doc('moakitUsers/'+seller.uid).set({
+  uid:seller.uid,email:seller.email,accountType:'seller',sellerStatus:'approved',
+  displayName:'Test Artist',sellerDisplayName:'Test Artist'
+ },{merge:true});
+ const newId='uploaded-'+uuid(),stamp=new Date().toISOString();
+ const newPdf='moakit/private/'+seller.uid+'/'+newId+'/'+uuid()+'.pdf';
+ const newBytes=Buffer.from('%PDF-1.4\\n1 0 obj<</Type/Catalog>>endobj\\n%%EOF\\n');
+ await bucket.file(newPdf).save(newBytes,{contentType:'application/pdf',resumable:false});
+ const profile={user:{uid:seller.uid,getIdToken:async()=>seller.token}};
+ const newDraft={id:newId,sellerUid:seller.uid,status:'draft',step:1,
+  createdAt:stamp,updatedAt:stamp,file:null,images:[],price:'25000',
+  category:'accessory',subcategory:'hat',info:{title:'New pattern',description:'Test',
+    technique:'대바늘',level:'3',sizes:'M',yarn:'Wool',amount:'3',needles:'4mm',gauge:'10cm'},
+  fieldSources:{},reviewed:true,rights:true};
+ const firstSaved=await savePatternToFirebase(profile,newDraft,{fetcher:restFetch});
+ assert.equal((await db.doc('moakitUsers/'+seller.uid+'/works/'+newId).get()).data().status,'draft');
+ const publish={...newDraft,status:'published',step:4,updatedAt:firstSaved,
+  file:{path:newPdf,name:'test.pdf',size:newBytes.length},
+  images:[{path:'moakit/public/'+seller.uid+'/'+newId+'/'+uuid()+'.webp',name:'cover'}]};
+ const publishedSaved=await savePatternToFirebase(profile,publish,{fetcher:restFetch});
+ const freshListing=(await db.doc('moakitPatterns/'+seller.uid+'_'+newId).get()).data();
+ const freshSource=(await db.doc('moakitUsers/'+seller.uid+'/works/'+newId).get()).data();
+ assert.equal(freshListing.status,'published');
+ assert.equal(freshListing.content,freshSource.publicContent);
+ assert.equal(freshSource.updatedAt,publishedSaved);
+ await assert.rejects(savePatternToFirebase(profile,{...publish,price:'10000'},{fetcher:restFetch}),/다른 기기/);
+ const freshPurchase=await api('pattern','testComplete',{id:seller.uid+'_'+newId,accepted:true},buyer2.token);
+ assert.equal(freshPurchase.status,201,JSON.stringify(freshPurchase.data));
+ const freshDownload=await api('pattern','download',{id:seller.uid+'_'+newId},buyer2.token);
+ assert.equal(freshDownload.status,200,JSON.stringify(freshDownload.data));
+ assert.ok(freshDownload.data.equals(newBytes));
  const prod=await addPattern(seller,'one');
  let file=await api('pattern','download',{id:prod.id},buyer.token);
  assert.equal(file.status,403);
