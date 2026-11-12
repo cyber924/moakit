@@ -5,6 +5,7 @@ on:
       - firebase-commerce-hardening-20261112
       - firebase-diagnostic-transactions-20261112
       - simplify-commerce-no-stock-20261112
+      - cleanup-work-commerce-safe-20261112
   pull_request:
     branches:
       - main
@@ -28,11 +29,15 @@ jobs:
           node --check public/kit-admin.js
           node --check public/kit-core.mjs
           node --check public/commerce.js
+          node --check public/commerce-switch.mjs
+          node --check public/kit-orders.js
+          node --check public/kits-client.js
+          node --check server/commerce-routing.mjs
           node --check functions/commerce-core.cjs
           node --check functions/commerce-diagnostics.cjs
           node --check public/firebase-commerce-diagnostics-admin.mjs
           node --check tests/firebase-emulator-commerce.cjs
-          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs tests/firebase-admin-diagnostics.test.mjs tests/firebase-simple-commerce.test.mjs
+          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs tests/firebase-admin-diagnostics.test.mjs tests/firebase-simple-commerce.test.mjs tests/work-commerce-cleanup.test.mjs tests/vercel-routing.test.mjs
       - name: Install backend dependencies and verify entry point
         run: |
           npm --prefix functions install --ignore-scripts --no-audit --no-fund

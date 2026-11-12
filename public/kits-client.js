@@ -8,8 +8,12 @@ export async function kitRequest(path='',data=null,{auth=false,timeout=45000,leg
  const user=window.MoaAccount?.user,uid=user?.uid,headers={};
  if(auth){if(!user)throw Error('로그인 후 이용해주세요.');headers.Authorization='Bearer '+await user.getIdToken();}
  if(data)headers['Content-Type']='application/json';
- const usingFirebase=!legacy&&(await commerceMode()==='firebase')&&!(data&&['recommend','suggest'].includes(data.action));
+ const oldRecommendation=!!(data&&['recommend','suggest'].includes(data.action));
+ const usingFirebase=!legacy&&!oldRecommendation&&(await commerceMode()==='firebase');
  if(usingFirebase)headers['X-MOAKIT-FIREBASE-COMMERCE']='1';
+ // Explicitly mark read-only historical catalog/orders and legacy AI recommendation.
+ // The server will independently refuse legacy checkout when Firebase is active.
+ if(legacy||oldRecommendation)headers['X-MOAKIT-LEGACY-VIEW']='1';
  const canFallback=!data&&!auth&&!usingFirebase;
  const fallback=async()=>{
   const kit=await firebaseKitReadFallback(path);
