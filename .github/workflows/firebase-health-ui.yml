@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - firebase-commerce-health-ui-20261112
+      - admin-ops-status-lights-20261112
   pull_request:
     branches:
       - main
@@ -23,4 +24,6 @@ jobs:
         run: |
           node --check public/admin.js
           node --check public/firebase-commerce-health-admin.mjs
-          node --test tests/firebase-commerce-health-admin.test.mjs
+          node --check public/admin-operations-health.mjs
+          node --check server/admin-system-health.mjs
+          node --test tests/firebase-commerce-health-admin.test.mjs tests/admin-operations-health.test.mjs tests/vercel-routing.test.mjs
