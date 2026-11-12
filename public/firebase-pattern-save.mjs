@@ -10,12 +10,12 @@ const REST='https://firestore.googleapis.com/v1/'+ROOT;
 const idOK=value=>typeof value==='string'&&/^[A-Za-z0-9-]{1,128}$/.test(value);
 const error=(message,status=400)=>Object.assign(Error(message),{status});
 
-async function fireRequest(path,token,{method='GET',body,fetcher=fetch,missing=false}={}){
+async function fireRequest(path,token,{method='GET',body,fetcher=fetch,missing=false,hiddenAsMissing=false}={}){
  const response=await fetcher(REST+path,{
   method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
   ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(35000)
  });
- if(missing&&response.status===404)return null;
+ if(missing&&(response.status===404||hiddenAsMissing&&response.status===403))return null;
  const result=await response.json().catch(()=>({}));
  if(!response.ok)throw error(response.status===403?
   'Firebase 도안 저장 권한이 없습니다. 로그인·Firestore 규칙을 확인해주세요.':
@@ -74,7 +74,14 @@ export async function savePatternToFirebase(F,d,{fetcher=fetch}={}){
  }
  let listing=null;
  if(draft.status==='published'){
-  listing=await fireRequest('/moakitPatterns/'+listingId(draft),token,{fetcher,missing:true});
+  // Firestore can report 403 for an absent listing because the public
+  // allow-get condition reads resource.data. Treat it as absent only while
+  // publishing a previously unpublished source; the create-only commit
+  // precondition prevents overwriting a suspended/hidden existing listing.
+  const unpublished=!source||decodeDocument(source).status!=='published';
+  listing=await fireRequest('/moakitPatterns/'+listingId(draft),token,{
+   fetcher,missing:true,hiddenAsMissing:unpublished
+  });
   if(listing){
    const old=decodeDocument(listing);
    if(old.sellerUid!==uid||old.sourceId!==draft.id||old.status==='suspended')
