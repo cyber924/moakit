@@ -114,6 +114,12 @@ async function run(){
  const patternSale=(await db.doc('moakitSales/'+saleId).get()).data();
  assert.equal(patternSale.sellerShare,17500);assert.equal(patternSale.platformShare,7500);
  assert.equal((await db.doc('moakitOrders/'+saleId).get()).data().storagePath,prod.path);
+ // Even when the seller changes metadata, the buyer retains the exact PDF purchased.
+ await db.doc('moakitUsers/'+seller.uid+'/works/work_one').update({
+  content:JSON.stringify({file:{path:'moakit/private/'+seller.uid+'/work_one/'+uuid()+'.pdf',
+   name:'changed.pdf',size:prod.bytes.length}})
+ });
+
  file=await api('pattern','download',{id:prod.id},buyer.token);
  assert.equal(file.status,200,JSON.stringify(file.data));
  assert.ok(file.data.equals(prod.bytes));
