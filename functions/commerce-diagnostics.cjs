@@ -134,14 +134,14 @@ module.exports=function createDiagnostics({
   const financeBody={action:'createSettlement',sellerUid,sellerName:'MOAKIT DIAGNOSTIC',
    from,to,saleIds:[second.pId]};
   const finance=capture();
-  await financeRoute({...request,method:'POST',body:financeBody},finance);
+  await financeRoute({headers:request.headers,method:'POST',body:financeBody},finance);
   check(steps,'판매 정산 검토서 25,000원 · 작가 17,500원 · 플랫폼 7,500원',
    finance.statusCode===201&&finance.body?.settlement?.payout===17500
    &&finance.body?.settlement?.platformShare===7500);
   const settlementId=finance.body?.settlement?.id;
   if(settlementId)scope.doc(ref(collections.settlements,settlementId));
   let duplicate=false;
-  try{await financeRoute({...request,method:'POST',body:financeBody},capture());}
+  try{await financeRoute({headers:request.headers,method:'POST',body:financeBody},capture());}
   catch(e){duplicate=e.status===409;}
   check(steps,'중복 정산 등록 차단',duplicate);
   let refundBlocked=false;
