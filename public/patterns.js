@@ -1,5 +1,4 @@
 import {detailTemplate,galleryPhoto,levelMarkup} from './detail-template.mjs';
-import {fetchFirebasePublishedPatterns,mergeFirebasePatternRows} from './firebase-pattern-catalog.mjs';
 import {DEFAULT_FILTERS,normalizeFilters,filterWorks,filtersToQuery,queryToFilters} from './patterns-core.mjs';
 const UI=window.MoaUI,{categories}=window.MoaCatalog,esc=UI.escapeHtml;
 let works=[],catalogView='all',catalogLoading=true,catalogError='';const samples=window.MoaCatalog.works;
@@ -49,38 +48,31 @@ document.addEventListener('click',event=>{if(event.target.closest('[data-preview
 window.MoaPatterns={open,back};
 let catalogEpoch=0;
 async function loadCatalog(){
- const epoch=++catalogEpoch;
- catalogLoading=true;catalogError='';
+ const epoch=++catalogEpoch;catalogLoading=true;catalogError='';
  if(location.hash.startsWith('#patterns'))renderList();
  try{
-  const work=async()=>{
-   let page=1,rows=[];
-   do{
-    const response=await fetch('/api/pattern-catalog?'+new URLSearchParams({view:catalogView,page,size:24}),{signal:AbortSignal.timeout(30000)});
-    const result=await response.json();
-    if(!response.ok)throw Error(result.error||'기존 도안 목록 조회 실패');
-    rows.push(...result.patterns);
-    if(page>=result.pages)break;
-    if(++page>100)throw Error('도안 목록 페이지 제한');
-   }while(true);
-   return rows;
-  };
-  const [legacy,firebase]=await Promise.allSettled([work(),fetchFirebasePublishedPatterns()]);
-  if(legacy.status!=='fulfilled'&&firebase.status!=='fulfilled')throw Error('도안 목록 서버가 모두 연결되지 않았습니다.');
-  const rows=firebase.status==='fulfilled'
-   ?mergeFirebasePatternRows(firebase.value,legacy.status==='fulfilled'?legacy.value:[],catalogView)
-   :legacy.value;
+  let page=1,rows=[];
+  do{
+   const response=await fetch('/api/pattern-catalog?'+new URLSearchParams({view:catalogView,page,size:50}),{
+    cache:'no-store',signal:AbortSignal.timeout(30000)});
+   const result=await response.json();
+   if(!response.ok||!result.ready)throw Error(result.error||'Firebase 도안 목록을 불러오지 못했습니다.');
+   rows.push(...result.patterns);
+   if(page>=result.pages)break;
+   if(++page>100)throw Error('도안 목록을 나누어 조회해주세요.');
+  }while(true);
   if(epoch!==catalogEpoch)return;
   works=rows.map(r=>{
    const d=r.data,original=r.sample?samples.find(w=>w.id===r.id):null;
    return {...original,id:r.id,name:d.title,maker:d.sellerName,price:Number(d.price),
     category:d.category,subcategory:d.subcategory,technique:d.technique,
     level:'LEVEL '+(d.level||3),levelNumber:Number(d.level||3),
-    sizes:String(d.sizes||'확인 필요').split(/\\s*[\\/·,]\\s*/),
-    seasons:['사계절'],date:r.updatedAt||'',featured:r.recommended,
-    sample:!!r.sample,intro:d.description,
-    imageUrl:d.images?.[0]?(d.images[0].startsWith('/assets/')?d.images[0]:
-     'https://firebasestorage.googleapis.com/v0/b/studio-1613487721-b043c.firebasestorage.app/o/'+encodeURIComponent(d.images[0])+'?alt=media'):null};
+    sizes:String(d.sizes||'확인 필요').split(/\\s*[\\/·,]\\s*/),seasons:['사계절'],
+    date:r.updatedAt||'',featured:r.recommended,sample:!!r.sample,
+    intro:d.description,imageUrl:d.images?.[0]?
+      (d.images[0].startsWith('/assets/')?d.images[0]:
+       'https://firebasestorage.googleapis.com/v0/b/studio-1613487721-b043c.firebasestorage.app/o/'+
+       encodeURIComponent(d.images[0])+'?alt=media'):null};
   });
  }catch(e){if(epoch===catalogEpoch)catalogError=e.message;}
  finally{if(epoch===catalogEpoch){catalogLoading=false;if(patternRoute())route();}}
