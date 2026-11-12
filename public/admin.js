@@ -8,8 +8,7 @@ import {mountPromotionsAdmin} from './promotions-admin.js';
 import {mountAiContentAdmin} from './ai-content-admin.js';
 import {mountKitAdmin} from './kit-admin.js';
 import {mountFinanceAdmin} from './finance-admin.js';
-import {mountFirebaseCommerceHealth} from './firebase-commerce-health-admin.mjs';
-import {mountFirebaseCommerceDiagnostics} from './firebase-commerce-diagnostics-admin.mjs';
+import {mountAdminOperationsHealth} from './admin-operations-health.mjs';
 import {mountFirebaseCommerceCutover} from './firebase-commerce-cutover-admin.mjs';
 import {isFirebaseAdminReadAction} from './admin-local-actions.mjs';
 import {capabilities} from './member-core.mjs';
@@ -18,7 +17,7 @@ import {mountModeration} from './market.js';
 import {mountTester} from './tester.js';
 const UI=window.MoaUI,E=UI.escapeHtml;
 const root=document.createElement('main');root.id='admin-root';root.hidden=true;document.querySelector('footer').before(root);
-const style=document.createElement('link');style.rel='stylesheet';style.href='/admin.css?v=admins-storage-gallery-1';document.head.append(style);
+const style=document.createElement('link');style.rel='stylesheet';style.href='/admin.css?v=ops-status-lights-20261112';document.head.append(style);
 let context=null,epoch=0,currentKey='',controller=null,loadedUid=null;
 let members=[],member=null,version='',fullyLoaded=false,loading=false,loadError='',permissionFailure=false;
 let filters={query:'',role:'all',status:'all',sort:'newest'},page=1;
@@ -37,18 +36,17 @@ export async function mountAdmin(next){if(!capabilities(next.profile,next.claims
  const section=location.hash.split('/')[1]||'dashboard';shell(section);refreshSupportCount(mine);try{await request('session');if(mine!==epoch)return;const target=root.querySelector('#admin-content');if(section==='settings')await mountSiteSettings(target);else if(section==='dashboard')await dashboard(target,mine);else if(section==='members'){const uid=location.hash.split('/')[2];if(uid)await memberDetail(target,decodeURIComponent(uid),mine);else await memberList(target,mine);}else if(section==='pattern-display'){target.innerHTML='<div class="admin-heading"><h1>도안 추천·베스트 관리</h1><p>체크 후 적용을 누르면 공개 도안 목록에 반영됩니다.</p></div><div data-pattern-display></div>';await mountPatternAdmin(target.querySelector('[data-pattern-display]'),context.Firebase);}else if(section==='patterns'){target.innerHTML='<div class="admin-heading"><span>CONTENT / PATTERN</span><h1>도안 관리</h1><p>작가가 등록한 도안을 점검하고 공개 상태를 관리합니다.</p></div><div id="moderation-root"></div>';mountModeration(context.Firebase);}else if(section==='tester-calls'){target.innerHTML='<div class="admin-heading"><span>COMMUNITY / TESTER</span><h1>테스터콜·실 지원</h1></div><div id="tester-admin-root"></div>';mountTester({F:context.Firebase,profile:context.profile,admin:true,mode:'admin'});}else if(section==='kits'){target.innerHTML='<div class="admin-heading"><span>PRODUCT / KIT</span><h1>KIT 관리</h1><p>실·바늘·부자재 재료 키트의 상품 정보와 이미지를 관리합니다.</p></div><div id="kit-admin-content"></div>';mountKitAdmin(target.querySelector('#kit-admin-content'));}else if(section==='images'){mountImageLibrary(target);}else if(section==='support'){mountSupport(target,{admin:true});}else if(section==='notifications'){mountNotificationsAdmin(target);}else if(section==='creators'){mountCreatorsAdmin(target);}else if(section==='promotions'){mountPromotionsAdmin(target);}else if(section==='ai'){mountAiContentAdmin(target);}else if(['sales','settlements','orders'].includes(section)){mountFinanceAdmin(target,section==='settlements'?'settlements':'sales',{orders:section==='orders'});}else target.innerHTML=error('존재하지 않는 관리자 메뉴입니다.');}catch(e){if(mine===epoch&&e.name!=='AbortError')root.querySelector('#admin-content').innerHTML=(e.code==='FIRESTORE_PERMISSION_DENIED'?permissionPanel():error(e.message))+'<button class="admin-button" data-admin-retry>다시 확인하기</button>';root.querySelector('[data-admin-retry]')?.addEventListener('click',()=>{currentKey='';mountAdmin(next);});}}
 async function dashboard(target,mine){target.innerHTML='<div class="admin-loading" role="status">운영 현황을 집계하고 있습니다.</div>';const d=await request('overview');if(mine!==epoch)return;const c=d.counts,n=k=>c[k]===null?'—':Number(c[k]).toLocaleString('ko-KR');target.innerHTML=`<div class="admin-heading"><span>OVERVIEW</span><h1>모아키트의 오늘을 한눈에.</h1><p>회원과 작가, 작품과 커뮤니티의 운영 현황을 확인하세요.</p><div class="admin-heading-bottom"><span>${date(d.updatedAt)} 기준 · 실제 DB 집계</span><button class="admin-button" id="admin-overview-refresh">새로고침 ↻</button></div></div>${d.warnings.length?error('일부 집계를 불러오지 못했습니다. 권한 또는 연결 상태를 확인하고 새로고침해주세요.'):''}<div class="admin-stat-grid">${[['members','전체 회원','회원 프로필 기준','members'],['buyers','구매자','구매자로 가입한 회원','members'],['sellers','판매자','판매자 유형의 회원','members'],['patterns','등록 도안',`공개 ${n('published')} · 판매 중지 ${n('suspended')}`,'patterns']].map(([key,title,note,href])=>`<a href="#admin/${href}" class="admin-stat"><span>${title}</span><strong>${n(key)}<small>${key==='patterns'?'개':'명'}</small></strong><p>${key==='patterns'?'공개 '+n('published')+' · 판매 중지 '+n('suspended'):note}</p><i>↗</i></a>`).join('')}</div><div class="admin-dashboard-columns"><section class="admin-card"><div class="admin-card-heading"><h2>지금 확인할 업무</h2><span>TO DO</span></div><a class="admin-task" href="#admin/tester-calls"><span class="admin-task-icon">✳</span><span><b>공개 대기 공고 확인</b><small>공고 확인·등록 복구·사후 점검</small></span><strong>${n('pendingCalls')}</strong><i>›</i></a><a class="admin-task" href="#admin/tester-calls"><span class="admin-task-icon">▧</span><span><b>실 지원 검토</b><small>모집 공개와 별도로 실 지원 여부 확인</small></span><strong>${n('supportRequests')}</strong><i>›</i></a><a class="admin-task" href="#admin/patterns"><span class="admin-task-icon">▤</span><span><b>판매 중지 도안</b><small>수정 사항 확인 후 판매 재개 관리</small></span><strong>${n('suspended')}</strong><i>›</i></a></section><section class="admin-card admin-guide"><span class="admin-eyebrow">OPERATIONS NOTE</span><h2>작가의 창작과<br>니터의 경험을 연결해요.</h2><p>도안은 등록 후 즉시 공개됩니다.<br>테스터 모집도 등록 후 바로 공개되며 사후 점검합니다.</p><div><span>전체 테스터 모집</span><b>${n('calls')}건</b></div><a href="#admin/tester-calls">모집 운영 관리 ↗</a></section></div><div class="admin-section-heading"><h2>서비스 기능 확인</h2><p>관리자 권한으로 실제 화면을 확인합니다. 일반 회원 권한 테스트는 별도 테스트 계정을 이용하세요.</p></div><div class="admin-shortcuts">${[['#my','구매자 MY','구매 도안·주문·찜·테스터 활동'],['#my/seller','판매자 스튜디오','작품 등록·수정·테스터 운영'],['#admin/kits','키트 관리','재료 KIT 등록·AI 설명·이미지 관리'],['#admin/sales','판매 관리','도안·KIT 매출과 주문·배송'],['#admin/settlements','정산 관리','작가별 수익배분·정산·지급 기록']].map(([href,title,desc])=>`<a href="${href}"><b>${title} ↗</b><p>${desc}</p></a>`).join('')}</div><p class="admin-footnote">회원 수는 Firebase Authentication 계정 수가 아닌 moakitUsers에 저장된 회원 프로필 수입니다. KIT 테스트 주문은 실제 매출로 집계하지 않습니다.</p>`;
  target.querySelector('#admin-overview-refresh').onclick=()=>{currentKey='';mountAdmin(context);};
- const diagnostic=document.createElement('div');
- diagnostic.id='admin-firebase-commerce-health';
- target.querySelector('.admin-stat-grid')?.after(diagnostic);
- mountFirebaseCommerceHealth(diagnostic,context.Firebase.user);
- const testTarget=document.createElement('div');
- testTarget.id='admin-firebase-commerce-diagnostics';
- diagnostic.after(testTarget);
- mountFirebaseCommerceDiagnostics(testTarget,context.Firebase.user);
- const switchTarget=document.createElement('div');
- switchTarget.id='admin-firebase-commerce-cutover';
- testTarget.after(switchTarget);
- mountFirebaseCommerceCutover(switchTarget,context.Firebase.user);
+ const healthTarget=document.createElement('div');
+ healthTarget.id='admin-operations-health';
+ target.querySelector('.admin-stat-grid')?.after(healthTarget);
+ mountAdminOperationsHealth(healthTarget,context.Firebase.user);
+ const advanced=document.createElement('details');
+ advanced.className='admin-ops-advanced';
+ advanced.innerHTML='<summary>고급 운영 설정 · 구매 경로 비상 복귀 <span>평상시에는 변경할 필요가 없습니다.</span></summary>'+
+   '<p class="admin-ops-advanced-note">일부 도안·관리자 기능과 과거 Work 구매 기록은 아직 Work 서버에 연결되어 있습니다. 장애 확인 전 구매 경로를 변경하지 마세요.</p>'+
+   '<div id="admin-firebase-commerce-cutover"></div>';
+ healthTarget.after(advanced);
+ mountFirebaseCommerceCutover(advanced.querySelector('#admin-firebase-commerce-cutover'),context.Firebase.user);
 }
 function listFrame(target){target.innerHTML=`<div class="admin-heading"><span>MEMBERS</span><h1>회원 관리</h1><p>구매자·판매자·관리자의 회원정보와 운영 권한을 관리합니다.</p><button class="admin-button primary" data-create-administrator>＋ 관리자 추가</button></div><div class="admin-card"><form id="admin-member-search" class="admin-search"><input name="query" type="search" maxlength="100" aria-label="회원 검색" placeholder="이름, 이메일, 작가명 또는 UID 검색" value="${E(filters.query)}"><button class="admin-button primary" type="submit">검색</button></form><div class="admin-member-filters"><label>가입 유형<select id="admin-role"><option value="all">전체 회원</option><option value="admin">관리자</option><option value="buyer">구매자</option><option value="seller">판매자</option></select></label><label>판매자 상태<select id="admin-status"><option value="all">전체 상태</option>${Object.entries(statuses).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></label><label>정렬<select id="admin-sort"><option value="newest">최근 가입순</option><option value="name">이름순</option></select></label><button class="admin-button" id="admin-members-refresh">새로고침 ↻</button></div><p class="admin-load-state" id="admin-members-loading" role="status"></p><div id="admin-members-result"></div></div>`;
  target.querySelector('[data-create-administrator]').onclick=createAdministrator;target.querySelector('#admin-role').value=filters.role;target.querySelector('#admin-status').value=filters.status;target.querySelector('#admin-sort').value=filters.sort;
