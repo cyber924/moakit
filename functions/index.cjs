@@ -579,6 +579,7 @@ async function cutoverRoute(req,res){
  return json(res,{active:result,mode:result?'firebase':'legacy',
   notice:'기존 구매 기록은 Work 조회 경로에 그대로 보존됩니다.'});
 }
+const communityRoute=require('./community.cjs')({db,now,session,adminSession,fail,json});
 const runDiagnostics=require('./commerce-diagnostics.cjs')({
  db,bucket,ref,collections,now,adminSession,active,
  checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
@@ -603,6 +604,7 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   if(resource==='orders')return await ordersRoute(req,res);
   if(resource==='pattern')return await patternRoute(req,res);
   if(resource==='finance')return await financeRoute(req,res);
+  if(resource==='community')return await communityRoute(req,res);
   if(resource==='diagnostics')return await runDiagnostics(req,res);
   throw fail('요청한 기능을 찾지 못했습니다.',404);
  }catch(e){
