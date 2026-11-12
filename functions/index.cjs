@@ -563,7 +563,9 @@ async function cutoverRoute(req,res){
   const kits=await db.collection(collections.kits).where('status','==','published').limit(1).get();
   const patterns=await db.collection(collections.patterns).where('status','==','published').limit(1).get();
   if(kits.empty||patterns.empty)throw fail('Firebase에 공개 KIT와 도안이 있어야 전환할 수 있습니다.',409);
-  try{await bucket.getMetadata();}catch{throw fail('Firebase Storage 연결을 확인해주세요.',409);}
+  if(process.env.FUNCTIONS_EMULATOR!=='true'){
+   try{await bucket.getMetadata();}catch{throw fail('Firebase Storage 연결을 확인해주세요.',409);}
+  }
  }
  const stateRef=ref('moakitSettings','commerce');
  const result=await db.runTransaction(async tx=>{
