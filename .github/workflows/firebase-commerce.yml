@@ -4,6 +4,7 @@ on:
     branches:
       - firebase-commerce-hardening-20261112
       - firebase-diagnostic-transactions-20261112
+      - simplify-commerce-no-stock-20261112
   pull_request:
     branches:
       - main
@@ -23,6 +24,10 @@ jobs:
       - name: Validate Cloud Functions and pure transaction helpers
         run: |
           node --check functions/index.cjs
+          node --check public/kits.js
+          node --check public/kit-admin.js
+          node --check public/kit-core.mjs
+          node --check public/commerce.js
           node --check functions/commerce-core.cjs
           node --check functions/commerce-diagnostics.cjs
           node --check public/firebase-commerce-diagnostics-admin.mjs
