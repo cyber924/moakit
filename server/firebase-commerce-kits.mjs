@@ -1,3 +1,4 @@
+import {createHmac} from 'node:crypto';
 import {quoteKits,shippingInput,ORDER_STATES} from '../public/kit-core.mjs';
 import {revenue7030} from '../public/finance-reconciliation-core.mjs';
 import {ROOT,name,doc,decode,query,begin,batchGet,commit,rollback,put,patch,
@@ -8,6 +9,22 @@ const keyPattern=/^[a-f0-9-]{36}$/;
 const now=()=>new Date().toISOString();
 const validKit=x=>typeof x?.id==='string'&&ID.test(x.id);
 const maxQty=x=>Number.isSafeInteger(x)&&x>=1&&x<=20;
+// A keyed digest binds retries to the buyer, cart and shipping without
+// exposing a plaintext delivery address in the public order document.
+export function kitCheckoutFingerprint(uid,items,shipping,key){
+ if(!/^[a-f0-9]{64}$/i.test(key||''))throw fail('주문 암호화 설정이 필요합니다.',503);
+ const lines=items.map(x=>({
+  id:x.id,quantity:x.quantity,version:x.version,size:x.size,color:x.color,
+  extras:Array.isArray(x.extras)?[...x.extras].sort():[]
+ })).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+ return createHmac('sha256',Buffer.from(key,'hex'))
+  .update(JSON.stringify({uid,items:lines,shipping})).digest('hex');
+}
+function verifyRetry(order,fingerprint){
+ // Previously imported receipts did not persist this field.
+ if(order.checkoutFingerprint&&order.checkoutFingerprint!==fingerprint)
+  throw fail('같은 주문번호로 다른 주문 내용을 보낼 수 없습니다.',409);
+}
 function convert(r){
  if(!r||r.status==='deleted')throw fail('삭제된 KIT 상품입니다.',404);
  let data;try{data=JSON.parse(r.dataJson);}catch{throw fail('KIT 상품 원본 내용이 손상됐습니다.',409);}
@@ -68,12 +85,14 @@ async function checkout(user,input){
  if(typeof input.checkoutKey!=='string'||!keyPattern.test(input.checkoutKey))throw fail('주문 식별자가 올바르지 않습니다.');
  if(input.accepted!==true)throw fail('테스트 구매 안내를 확인해주세요.');
  const ids=lineInput(input.items),orderId='kit_'+input.checkoutKey;
+ const shipping=shippingInput(input.shipping);
+ const fingerprint=kitCheckoutFingerprint(user.uid,input.items,shipping,process.env.MOAKIT_ORDER_ENCRYPTION_KEY);
  const old=decode(await doc('moakitOrders',orderId));
  if(old){
   if(old.buyerUid!==user.uid||old.kind!=='kit'||old.source!=='firebase-checkout')throw fail('주문 식별자가 이미 사용되고 있습니다.',409);
+  verifyRetry(old,fingerprint);
   return json({order:await show(old)},200);
  }
- const shipping=shippingInput(input.shipping);
  for(let attempt=0;attempt<3;attempt++){
   let tx;
   try{
@@ -84,6 +103,7 @@ async function checkout(user,input){
    if(existing){
     await rollback(tx);
     if(existing.buyerUid!==user.uid||existing.source!=='firebase-checkout')throw fail('주문 번호 충돌',409);
+    verifyRetry(existing,fingerprint);
     return json({order:await show(existing)},200);
    }
    const records=ids.map(id=>convert(found.get(name('moakitKits',id))));
@@ -102,7 +122,7 @@ async function checkout(user,input){
     title:enriched.map(x=>x.title).join(' + ').slice(0,150),amount:total,
     quantity:enriched.reduce((n,x)=>n+x.quantity,0),shippingFee,charged:0,mode:'test',
     status:'received',verification:'verified',source:'firebase-checkout',
-    createdAt,updatedAt:createdAt,version:1,detail:JSON.stringify(enriched.map(x=>({
+    createdAt,updatedAt:createdAt,version:1,checkoutFingerprint:fingerprint,detail:JSON.stringify(enriched.map(x=>({
       id:x.id,title:x.title,quantity:x.quantity,subtotal:x.subtotal}))).slice(0,12000),
     itemsJson:JSON.stringify(enriched),carrier:'',tracking:'',stockRestored:false
    };
@@ -119,8 +139,10 @@ async function checkout(user,input){
    if(tx)await rollback(tx);
    if([409,412].includes(e.status)&&attempt<2)continue;
    const recovered=decode(await doc('moakitOrders',orderId));
-   if(recovered?.buyerUid===user.uid&&recovered.source==='firebase-checkout')
+   if(recovered?.buyerUid===user.uid&&recovered.source==='firebase-checkout'){
+    verifyRetry(recovered,fingerprint);
     return json({order:await show(recovered)},200);
+   }
    throw e;
   }
  }
@@ -159,7 +181,11 @@ async function changeOrder(user,input){
     const found=await batchGet([...ids.map(i=>name('moakitKits',i)),...saleNames],tx);
     const orderSales=items.map((_,i)=>found.get(saleNames[i]));
     if(orderSales.some(x=>!x))throw fail('판매 원장이 누락돼 취소를 중단했습니다.',409);
-    const settled=await Promise.all([...new Set(orderSales.map(x=>x.sellerUid))].map(uid=>query('moakitSettlements','sellerUid',uid)));
+    const settled=await Promise.all([...new Set(orderSales.map(x=>x.sellerUid))].map(async uid=>{
+     const rows=await query('moakitSettlements','sellerUid',uid,1001,tx);
+     if(rows.length>=1000)throw fail('정산 기록이 많아 취소를 보류했습니다. 관리자 대조가 필요합니다.',409);
+     return rows;
+    }));
     const protectedIds=new Set(settled.flat().flatMap(batch=>String(batch.saleIds||'').split(',').filter(Boolean)));
     if(orderSales.some((x,i)=>protectedIds.has('fc_'+id+'_'+i)))
      throw fail('이미 정산 검토서에 포함된 KIT 판매입니다. 관리자 대조 후 취소해주세요.',409);
@@ -211,7 +237,8 @@ async function list(user,url){
 }
 export async function firebaseKitOrdersApi(request){
  try{
-  const user=await userFromRequest(request,{admin:false}),url=new URL(request.url);
+  const url=new URL(request.url);
+  const user=await userFromRequest(request,{admin:request.method==='GET'&&url.searchParams.get('admin')==='1'});
   if(request.method==='GET')return list(user,url);
   if(request.method!=='POST')throw fail('POST 요청만 지원합니다.',405);
   const input=await jsonBody(request,30000);

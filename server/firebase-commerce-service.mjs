@@ -63,10 +63,10 @@ export const doc=async(collection,id,transaction='')=>{
  }catch(e){if(e.status===404)return null;throw e;}
 };
 export const decode=source=>source?{...decodeDocument(source),_docId:source.name.split('/').pop(),_updateTime:source.updateTime}:null;
-export async function query(collection,field,value,limit=1000){
+export async function query(collection,field,value,limit=1000,transaction=''){
  const body={structuredQuery:{from:[{collectionId:collection}],
   ...(field?{where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:String(value)}}}}:{}),
-  limit}};
+  limit},...(transaction?{transaction}:{})};
  const result=await googleRequest(ROOT+':runQuery',{method:'POST',body});
  return (Array.isArray(result)?result:[]).filter(x=>x.document).map(x=>decode(x.document));
 }
