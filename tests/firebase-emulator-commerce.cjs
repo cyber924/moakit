@@ -139,6 +139,25 @@ async function run(){
  const freshDownload=await api('pattern','download',{id:seller.uid+'_'+newId},buyer2.token);
  assert.equal(freshDownload.status,200,JSON.stringify(freshDownload.data));
  assert.ok(freshDownload.data.equals(newBytes));
+ // Staged Firebase community is isolated from the legacy Work discussion.
+ const newPatternId=seller.uid+'_'+newId;
+ await db.doc('moakitUsers/'+buyer.uid).set({uid:buyer.uid,email:buyer.email,displayName:'Test Buyer',accountType:'buyer'},{merge:true});
+ const question=await api('community','create',{patternId:newPatternId,kind:'question',body:'What needles?'},buyer.token);
+ assert.equal(question.status,201,JSON.stringify(question.data));
+ const publicQuestions=await fetch(host+'community&patternId='+encodeURIComponent(newPatternId)+'&kind=question');
+ const questionRows=await publicQuestions.json();
+ assert.equal(publicQuestions.status,200,JSON.stringify(questionRows));
+ assert.equal(questionRows.total,1);
+ assert.equal(questionRows.posts[0].body,'What needles?');
+ const answer=await api('community','reply',{patternId:newPatternId,kind:'question',
+  id:question.data.id,version:1,body:'4mm'},seller.token);
+ assert.equal(answer.status,200,JSON.stringify(answer.data));
+ const reviewDenied=await api('community','create',{patternId:newPatternId,kind:'review',
+  body:'I made this'},buyer.token);
+ assert.equal(reviewDenied.status,403,'non-tester must not publish a review');
+ const deleted=await api('community','delete',{patternId:newPatternId,kind:'question',
+  id:question.data.id,version:2},buyer.token);
+ assert.equal(deleted.status,200,JSON.stringify(deleted.data));
  const prod=await addPattern(seller,'one');
  let file=await api('pattern','download',{id:prod.id},buyer.token);
  assert.equal(file.status,403);
