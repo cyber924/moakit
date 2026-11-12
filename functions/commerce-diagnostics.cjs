@@ -2,7 +2,7 @@
 // Admin-only disposable live Firebase diagnostics. Never targets an existing KIT,
 // public pattern, real payment, or settled transaction.
 // Run ONLY while checkout is still routed to Work and staging header is present.
-const {randomUUID}=require('node:crypto');
+const {randomUUID,createHash}=require('node:crypto');
 const {Writable}=require('node:stream');
 
 const check=(steps,label,condition)=>{
@@ -133,6 +133,9 @@ module.exports=function createDiagnostics({
   const from='2020-01-01',to='2030-12-31';
   const financeBody={action:'createSettlement',sellerUid,sellerName:'MOAKIT DIAGNOSTIC',
    from,to,saleIds:[second.pId]};
+  const hash=createHash('sha256').update(second.pId).digest('hex').slice(0,24);
+  const predictableSettlement='test_'+sellerUid.slice(0,60)+'_'+hash;
+  scope.doc(ref(collections.settlements,predictableSettlement));
   const finance=capture();
   await financeRoute({headers:request.headers,method:'POST',body:financeBody},finance);
   check(steps,'판매 정산 검토서 25,000원 · 작가 17,500원 · 플랫폼 7,500원',
