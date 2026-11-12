@@ -367,7 +367,7 @@ async function patternFile(pattern){
  if(meta.contentType!=='application/pdf'||!Number.isInteger(Number(meta.size))||
   Number(meta.size)<1||Number(meta.size)>10485760)throw fail('PDF 원본이 유효하지 않습니다.',409);
  const filename=String(content.file?.name||'pattern.pdf').replace(/[\r\n"\\/]/g,'_').slice(0,150);
- return {file,filename,size:Number(meta.size)};
+ return {file,path,filename,size:Number(meta.size)};
 }
 async function trustedPurchase(uid,id){
  const order=await ref(collections.orders,patternId(uid,id)).get();
@@ -387,7 +387,7 @@ async function trustedPurchase(uid,id){
 function purchaseView(row){
  return {patternId:row.productId,buyerUid:row.buyerUid,sellerUid:row.sellerUid,
   sellerName:row.sellerName,title:row.title,amount:row.amount,mode:'test',
-  status:'test_completed',createdAt:row.createdAt,
+  status:'test_completed',createdAt:row.createdAt,storagePath:row.storagePath||'',
   orderNumber:'MOA-'+String(row.id||'').slice(-12).toUpperCase()};
 }
 async function library(user,res){
@@ -415,7 +415,7 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
  if(existing)return json(res,{purchase:purchaseView(existing),financeRecorded:true,mode:'test'});
  const product=await patternListing(id,{published:true,diagnostic});
  if(product.listing.sellerUid===user.uid)throw fail('본인 도안은 구매할 수 없습니다.',409);
- await patternFile(product);
+ const storedFile=await patternFile(product);
  const orderRef=ref(collections.orders,patternId(user.uid,id)),saleRef=ref(collections.sales,patternId(user.uid,id));
  const order=await db.runTransaction(async tx=>{
   const old=await tx.get(orderRef),oldSale=await tx.get(saleRef),nowProduct=await tx.get(product.snap.ref);
@@ -433,7 +433,9 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
    productId:id,sellerUid:listing.sellerUid,sellerName:String(product.content.sellerName||'작가').slice(0,80),
    title:String(product.content.title||'도안').slice(0,150),amount:product.price,
    quantity:1,charged:0,mode:'test',status:'recorded',verification:'verified',
-   createdAt:time,detail:'',source:'firebase-checkout'};
+   createdAt:time,detail:'',source:'firebase-checkout',
+   storagePath:storedFile.path,storageFileName:storedFile.filename,
+   storageWorkId:listing.sourceId,storageBucket:bucket.name};
   const sale={id:saleRef.id,orderId:orderRef.id,sourceOrderId:id,buyerUid:user.uid,
    sellerUid:receipt.sellerUid,sellerName:receipt.sellerName,kind:'pattern',title:receipt.title,
    productId:id,amount:parts.total,net:parts.total,refund:0,discount:0,
@@ -448,9 +450,141 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
 async function downloadPattern(user,id,res){
  const entitled=await trustedPurchase(user.uid,id);
  if(!entitled)throw fail('구매가 확인되지 않은 도안입니다.',403);
- const product=await patternListing(id);
- if(product.listing.sellerUid!==entitled.sellerUid)throw fail('도안 작가 정보가 변경됐습니다.',409);
- const {file,filename}=await patternFile(product);
+ let file,filename;
+ if(entitled.storagePath){
+  const prefix='moakit/private/'+entitled.sellerUid+'/'+entitled.storageWorkId+'/';
+  const basename=entitled.storagePath.slice(prefix.length);
+  if(!validId(entitled.sellerUid)||!validId(entitled.storageWorkId)
+   ||typeof entitled.storagePath!=='string'||!entitled.storagePath.startsWith(prefix)
+   ||entitled.storageBucket!==bucket.name
+   ||!new RegExp('^[A-Za-z0-9-]+[.]pdf
+ res.status(200).set('Content-Type','application/pdf')
+  .set('Content-Disposition','attachment; filename="pattern.pdf"; filename*=UTF-8\'\''+encodeURIComponent(filename))
+  .set('Cache-Control','private,no-store').set('X-Content-Type-Options','nosniff');
+ await new Promise((resolve,reject)=>{
+  const stream=file.createReadStream();
+  stream.on('error',reject);res.on('finish',resolve);res.on('close',resolve);
+  stream.pipe(res);
+ });
+}
+async function refundPattern(user,id,input,res){
+ if(!user.admin)throw fail('관리자 권한이 필요합니다.',403);
+ if(!validId(input.buyerUid))throw fail('구매자 번호가 필요합니다.');
+ const key=patternId(input.buyerUid,id),o=ref(collections.orders,key),s=ref(collections.sales,key);
+ const result=await db.runTransaction(async tx=>{
+  const [order,sale]=await Promise.all([tx.get(o),tx.get(s)]);
+  if(!order.exists||!sale.exists||order.data().source!=='firebase-checkout')
+   throw fail('Firebase 신규 구매만 취소할 수 있습니다.',409);
+  if(order.data().status==='cancelled')return true;
+  const claims=await settlementsInTx(tx,[sale.data().sellerUid]);
+  if(claimedBySettlements(claims,new Set([key])))throw fail('정산 검토서에 포함된 거래입니다.',409);
+  const timestamp=now();
+  tx.update(o,{status:'cancelled',updatedAt:timestamp});
+  tx.update(s,{status:'cancelled',refund:sale.data().amount,
+   net:0,sellerShare:0,platformShare:0,reviewedAt:timestamp});
+  return false;
+ },{maxAttempts:5});
+ return json(res,{cancelled:true,already:result});
+}
+async function patternRoute(req,res){
+ if(req.method!=='POST')throw fail('POST 요청만 허용합니다.',405);
+ const input=req.body||{},user=await session(req,input.action==='refund');
+ if(input.action==='library')return library(user,res);
+ const id=input.id;if(!validId(id))throw fail('도안 번호를 확인해주세요.');
+ if(input.action==='download')return downloadPattern(user,id,res);
+ if(input.action==='refund')return refundPattern(user,id,input,res);
+ if(input.action==='fileGrant')throw fail('파일 업로드는 기존 작가 등록 경로로 처리해주세요.',501);
+ if(input.action==='prepare'){
+  const product=await patternListing(id,{published:true}),file=await patternFile(product);
+  return json(res,{mode:'test',product:{id,title:product.content.title,
+   sellerName:product.content.sellerName||'작가',amount:product.price,fileName:file.filename,size:file.size}});
+ }
+ if(input.action==='testComplete'){
+  if(input.accepted!==true)throw fail('구매 안내를 확인해주세요.');
+  return buyPattern(user,id,res);
+ }
+ throw fail('지원하지 않는 도안 기능입니다.');
+}
+async function financeRoute(req,res){
+ if(req.method!=='POST')throw fail('POST 요청만 허용합니다.',405);
+ const user=await adminSession(req),input=req.body||{};
+ if(input.action!=='createSettlement')throw fail('지원하지 않는 정산 기능입니다.');
+ const {sellerUid,sellerName,from,to}=input,ids=input.saleIds;
+ if(!validId(sellerUid)||!Array.isArray(ids)||ids.length<1||ids.length>100
+  ||ids.some(x=>typeof x!=='string'||!/^[A-Za-z0-9_-]{1,450}$/.test(x))||new Set(ids).size!==ids.length
+  ||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from||'')||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to||'')
+  ||from>to)throw fail('정산 대상·기간을 확인해주세요.');
+ const sorted=[...ids].sort(),suffix=createHash('sha256').update(sorted.join('|')).digest('hex').slice(0,24);
+ const settleRef=ref(collections.settlements,'test_'+sellerUid.slice(0,60)+'_'+suffix);
+ const row=await db.runTransaction(async tx=>{
+  const old=await tx.get(settleRef);
+  if(old.exists)throw fail('이미 검토한 정산서입니다.',409);
+  const sales=await Promise.all(sorted.map(id=>tx.get(ref(collections.sales,id))));
+  if(sales.some(x=>!x.exists))throw fail('판매 원장이 누락됐습니다.',409);
+  const others=await tx.get(db.collection(collections.settlements).where('sellerUid','==',sellerUid).limit(1001));
+  if(others.size>=1000)throw fail('정산 내역이 많아 별도 대조가 필요합니다.',409);
+  const previous=new Set(others.docs.flatMap(x=>String(x.data().saleIds||'').split(',').filter(Boolean)));
+  if(sorted.some(id=>previous.has(id)))throw fail('이미 정산에 포함된 판매 내역이 있습니다.',409);
+  const rows=sales.map(x=>x.data());
+  if(rows.some(x=>x.sellerUid!==sellerUid||x.status!=='reviewed'||x.mode!=='test'||x.charged!==0
+   ||refunded(x)||x.verifiedSource!=='firebase-transaction'&&x.verifiedSource!=='legacy-d1-finance'
+   &&x.verifiedSource!=='legacy-pattern-purchase'))throw fail('미검증 또는 취소된 판매를 정산할 수 없습니다.',409);
+  const amountTotal=rows.reduce((n,x)=>n+x.amount,0),payout=rows.reduce((n,x)=>n+x.sellerShare,0);
+  if(!amount(amountTotal)||!amount(payout))throw fail('정산 금액이 올바르지 않습니다.',409);
+  const doc={id:settleRef.id,sellerUid,sellerName:String(sellerName||'작가').slice(0,80),
+   from,to,saleIds:sorted.join(','),amount:amountTotal,payout,platformShare:amountTotal-payout,
+   mode:'test',status:'review',paid:0,createdAt:now(),createdBy:user.uid,source:'firebase-transaction'};
+  tx.create(settleRef,doc);return doc;
+ },{maxAttempts:5});
+ return json(res,{settlement:row},201);
+}
+const runDiagnostics=require('./commerce-diagnostics.cjs')({
+ db,bucket,ref,collections,now,adminSession,active,
+ checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
+ refundPattern,financeRoute
+});
+exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeoutSeconds:60,
+ maxInstances:10,invoker:'public'},async(req,res)=>{
+ try{
+  if(req.method==='OPTIONS')throw fail('지원하지 않는 요청입니다.',405);
+  if(JSON.stringify(req.body||{}).length>500000)throw fail('요청 크기를 줄여주세요.',413);
+  const resource=String(req.query.resource||'');
+  if(resource==='status')return await statusRoute(req,res);
+  if(resource==='health')return await healthRoute(req,res);
+  // Staged requests are allowed only for authenticated administrators.
+  if(!await active()){
+   const staging=req.headers['x-moakit-staging']==='1';
+   if(!staging)throw fail('Firebase 상거래 전환 전입니다.',503);
+   await adminSession(req);
+  }
+  if(resource==='kits')return await catalogRoute(req,res);
+  if(resource==='orders')return await ordersRoute(req,res);
+  if(resource==='pattern')return await patternRoute(req,res);
+  if(resource==='finance')return await financeRoute(req,res);
+  if(resource==='diagnostics')return await runDiagnostics(req,res);
+  throw fail('요청한 기능을 찾지 못했습니다.',404);
+ }catch(e){
+  const status=Number.isInteger(e?.status)&&e.status>=400&&e.status<600?e.status:502;
+  // Detailed stack traces are only emitted inside disposable local emulators.
+  if(process.env.FUNCTIONS_EMULATOR==='true')console.error('MOAKIT_EMULATOR_ERROR',e?.stack||e);
+  else if(status>=500)console.error('MOAKIT_COMMERCE_ERROR',{name:String(e?.name||'Error'),code:String(e?.code||'UNKNOWN'),resource:String(req.query?.resource||'')});
+  if(!res.headersSent)json(res,{error:status===502?'Firebase 거래 요청을 처리하지 못했습니다.':e.message},status);
+  else res.destroy(e);
+ }
+});
+,'i').test(basename))
+   throw fail('구매 내역의 Firebase Storage 경로가 잘못됐습니다.',409);
+  file=bucket.file(entitled.storagePath);
+  const [meta]=await file.getMetadata();
+  if(meta.contentType!=='application/pdf'||Number(meta.size)<1||Number(meta.size)>10485760)
+   throw fail('원본 PDF 파일이 유효하지 않습니다.',409);
+  filename=String(entitled.storageFileName||'pattern.pdf').replace(/[\r\n"\\/]/g,'_').slice(0,150);
+ }else{
+  // Purchase records created before the snapshot retain the existing lookup.
+  const product=await patternListing(id);
+  if(product.listing.sellerUid!==entitled.sellerUid)throw fail('도안 작가 정보가 변경됐습니다.',409);
+  ({file,filename}=await patternFile(product));
+ }
  res.status(200).set('Content-Type','application/pdf')
   .set('Content-Disposition','attachment; filename="pattern.pdf"; filename*=UTF-8\'\''+encodeURIComponent(filename))
   .set('Cache-Control','private,no-store').set('X-Content-Type-Options','nosniff');
