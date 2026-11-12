@@ -90,7 +90,7 @@ function filterCatalog(items,q,admin){
  const level=String(q.level||'all');
  const min=q.minPrice===undefined?'':String(q.minPrice),max=q.maxPrice===undefined?'':String(q.maxPrice);
  let filtered=items.filter(k=>k.status!=='deleted'&&(admin||k.status==='published')
-  &&(!admin||state==='all'||state==='soldout'&&k.status==='published'&&k.soldOut||state===k.status)
+  &&(!admin||state==='all'||state==='soldout'&&k.status==='published'&&k.soldOut||state==='published'&&k.status==='published'&&!k.soldOut||state===k.status&&state!=='published')
   &&(category==='all'||k.data.category===category)
   &&(level==='all'||Number(k.data.level)===Number(level))
   &&(tab==='all'||tab==='ai'||tab==='popular'&&k.data.popular||tab==='weekly'&&k.data.weekly)
