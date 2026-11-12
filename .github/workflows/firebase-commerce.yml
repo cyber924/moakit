@@ -32,7 +32,7 @@ jobs:
           node --check functions/commerce-diagnostics.cjs
           node --check public/firebase-commerce-diagnostics-admin.mjs
           node --check tests/firebase-emulator-commerce.cjs
-          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs tests/firebase-admin-diagnostics.test.mjs
+          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs tests/firebase-admin-diagnostics.test.mjs tests/firebase-simple-commerce.test.mjs
       - name: Install backend dependencies and verify entry point
         run: |
           npm --prefix functions install --ignore-scripts --no-audit --no-fund
