@@ -31,11 +31,11 @@ export function mountFirebaseCommerceDiagnostics(target,user){
  <span class="admin-eyebrow">FIREBASE COMMERCE · TEST ONLY</span>
  <h2 style="font-size:18px;font-weight:500;margin:8px 0 4px">Firebase 실서버 거래 테스트</h2>
  <p style="font-size:12px;line-height:1.9;color:#727b67;margin:0 0 16px">
- 별도 비공개 테스트 상품·도안으로 주문·재고·PDF·정산을 확인한 뒤 테스트 데이터를 정리합니다.
+ 별도 비공개 테스트 상품·도안으로 주문·판매량·PDF·정산을 확인한 뒤 테스트 데이터를 정리합니다.
  기존 KIT 6개, 고객 주문, 실제 결제, Work 구매 경로는 변경하지 않습니다.
  테스트 실행 중 Firebase에 소량의 임시 기록이 만들어집니다.</p>
  <div style="display:flex;gap:8px;flex-wrap:wrap">
- <button type="button" class="admin-button primary" data-commerce-suite="kit">① KIT 주문·재고 테스트</button>
+ <button type="button" class="admin-button primary" data-commerce-suite="kit">① KIT 주문·판매량 테스트</button>
  <button type="button" class="admin-button" data-commerce-suite="pattern">② 도안 PDF·정산 테스트</button>
  </div>
  <div role="status" data-commerce-diagnostic-output style="white-space:pre-line;margin-top:14px;font-size:12px;line-height:1.9;color:#465642">테스트 실행 전입니다. Firebase 실서버 함수 업데이트가 완료된 다음 실행해 주세요.</div>
