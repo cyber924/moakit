@@ -550,6 +550,33 @@ async function financeRoute(req,res){
  },{maxAttempts:5});
  return json(res,{settlement:row},201);
 }
+// Explicit administrator-controlled switch. The previous Work order records are
+// retained and can still be viewed from the legacy tabs after activation.
+async function cutoverRoute(req,res){
+ if(req.method!=='POST')throw fail('전환 요청은 POST만 허용합니다.',405);
+ const admin=await adminSession(req);
+ const action=req.body?.action;
+ const expected=action==='enable'?'FIREBASE':action==='disable'?'WORK':'';
+ if(!expected||req.body?.confirmation!==expected)
+  throw fail('전환 확인을 다시 확인해주세요.',400);
+ if(action==='enable'){
+  const kits=await db.collection(collections.kits).where('status','==','published').limit(1).get();
+  const patterns=await db.collection(collections.patterns).where('status','==','published').limit(1).get();
+  if(kits.empty||patterns.empty)throw fail('Firebase에 공개 KIT와 도안이 있어야 전환할 수 있습니다.',409);
+  try{await bucket.getMetadata();}catch{throw fail('Firebase Storage 연결을 확인해주세요.',409);}
+ }
+ const stateRef=ref('moakitSettings','commerce');
+ const result=await db.runTransaction(async tx=>{
+  const old=await tx.get(stateRef),current=old.data()||{};
+  const next=action==='enable';
+  if(current.firebaseEnabled===next&&current.schemaVersion===1)return next;
+  tx.set(stateRef,{...current,firebaseEnabled:next,schemaVersion:1,
+   commerceRouteUpdatedAt:now(),commerceRouteUpdatedBy:admin.uid},{merge:true});
+  return next;
+ });
+ return json(res,{active:result,mode:result?'firebase':'legacy',
+  notice:'기존 구매 기록은 Work 조회 경로에 그대로 보존됩니다.'});
+}
 const runDiagnostics=require('./commerce-diagnostics.cjs')({
  db,bucket,ref,collections,now,adminSession,active,
  checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
@@ -563,6 +590,7 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   const resource=String(req.query.resource||'');
   if(resource==='status')return await statusRoute(req,res);
   if(resource==='health')return await healthRoute(req,res);
+  if(resource==='cutover')return await cutoverRoute(req,res);
   // Staged requests are allowed only for authenticated administrators.
   if(!await active()){
    const staging=req.headers['x-moakit-staging']==='1';
