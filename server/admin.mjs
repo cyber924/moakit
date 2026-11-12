@@ -108,9 +108,15 @@ export async function adminApi(request,fetcher=fetch,env={}){
  const id=body.id;if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,260}$/.test(id))throw fail('도안 주소를 확인해주세요.',400);
  const doc=await db('/moakitPatterns/'+encodeURIComponent(id)),record=patternRecord(doc);if(typeof body.version!=='string'||body.version!==doc.updateTime)throw fail('도안 정보가 변경됐습니다. 다시 불러온 후 저장해주세요.',409);
  const next=editPattern(record,body.changes);
- const recordId=await prepareAdminRecord({record,next,user,bearer,env,fetcher});
- try{await db(':commit',{method:'POST',body:{writes:[{update:{name:root+'/moakitPatterns/'+id,fields:encodeFields(next)},updateMask:{fieldPaths:Object.keys(next)},currentDocument:{updateTime:doc.updateTime}}]}});}catch(e){await finishRecord(env,recordId,false);throw e;}await finishRecord(env,recordId);
- const saved=await db('/moakitPatterns/'+encodeURIComponent(id));try{await catalogUpsert(env,saved,bearer,fetcher);}catch{console.warn('PATTERN_CATALOG_SYNC_PENDING');}return reply({saved:true,pattern:patternRecord(saved)});
+ // New admin corrections use the same Firestore document as buyer catalog.
+ // Previous Work registration records remain untouched and readable.
+ await db(':commit',{method:'POST',body:{writes:[{
+  update:{name:root+'/moakitPatterns/'+id,fields:encodeFields(next)},
+  updateMask:{fieldPaths:Object.keys(next)},
+  currentDocument:{updateTime:doc.updateTime}
+ }]}});
+ const saved=await db('/moakitPatterns/'+encodeURIComponent(id));
+ return reply({saved:true,pattern:patternRecord(saved),storage:'firebase'});
  }
  const uid=body.uid;if(typeof uid!=='string'||!uid||uid.length>128||uid.includes('/'))throw fail('회원을 선택해주세요.',400);
  if(body.action==='member') {const doc=await db('/moakitUsers/'+encodeURIComponent(uid));const m=decodeDocument(doc),roles=await memberAdminRoles(db);return reply({member:{...m,isAdministrator:adminFlag(m,roles)},version:doc.updateTime});}
