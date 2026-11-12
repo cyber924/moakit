@@ -205,7 +205,8 @@ async function listOrders(user,q,res){
  const orders=await Promise.all(filtered.slice(offset,offset+20).map(showOrder));
  return json(res,{orders,nextCursor:filtered.length>offset+20?Buffer.from(String(offset+20)).toString('base64url'):null});
 }
-async function checkoutKit(user,input,res){
+async function checkoutKit(user,input,res,{diagnostic=false}={}){
+ if(diagnostic&&(!user.admin||!input.items?.every(x=>typeof x.id==='string'&&x.id.startsWith('diag_'))))throw fail('관리자 진단 상품만 테스트할 수 있습니다.',403);
  if(input.accepted!==true)throw fail('테스트 구매 안내를 확인해주세요.');
  const ids=itemIds(input.items),shipping=shippingInput(input.shipping),id='kit_'+input.checkoutKey;
  const fingerprint=checkoutFingerprint(user.uid,input.checkoutKey,input.items,shipping);
@@ -218,7 +219,7 @@ async function checkoutKit(user,input,res){
     throw fail('동일 주문번호에 다른 내용이 이미 저장되어 있습니다.',409);
    return {order:previous,existing:true};
   }
-  const kits=await getKits(ids,tx),quote=kitQuote(input.items,kits);
+  const kits=await getKits(ids,tx),quote=kitQuote(input.items,kits,{diagnostic});
   const timestamp=now(),first=quote.items[0],seller=quote.items.length===1?first.financeSellerUid:'__platform__';
   const receipt={id,kind:'kit',buyerUid:user.uid,sourceOrderId:input.checkoutKey,
    productId:first.id,sellerUid:seller,sellerName:quote.items.length===1?first.financeSellerName:'모아키트',
@@ -317,11 +318,11 @@ async function ordersRoute(req,res){
  throw fail('지원하지 않는 주문 기능입니다.');
 }
 function patternId(uid,id){return 'pattern_'+uid+'_'+id;}
-async function patternListing(id,{published=false}={}){
+async function patternListing(id,{published=false,diagnostic=false}={}){
  if(!validId(id))throw fail('도안 번호를 확인해주세요.');
  const snap=await ref(collections.patterns,id).get();
  if(!snap.exists)throw fail('도안이 없습니다.',404);
- const d=snap.data();if(published&&d.status!=='published')throw fail('현재 판매하지 않는 도안입니다.',409);
+ const d=snap.data();if(published&&!(d.status==='published'||diagnostic&&d.status==='diagnostic'&&id.startsWith('diag_')))throw fail('현재 판매하지 않는 도안입니다.',409);
  let content;try{content=JSON.parse(d.content||'{}');}catch{throw fail('도안 자료가 손상됐습니다.',409);}
  if(!validId(d.sellerUid)||!validId(d.sourceId)||!amount(Number(content.price)))
   throw fail('도안 정보가 유효하지 않습니다.',409);
@@ -383,10 +384,11 @@ async function library(user,res){
  }
  return json(res,{purchases:[...byId.values()].sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))),nextPageToken:null});
 }
-async function buyPattern(user,id,res){
+async function buyPattern(user,id,res,{diagnostic=false}={}){
+ if(diagnostic&&(!user.admin||!id.startsWith('diag_')))throw fail('관리자 진단 도안만 테스트할 수 있습니다.',403);
  const existing=await trustedPurchase(user.uid,id);
  if(existing)return json(res,{purchase:purchaseView(existing),financeRecorded:true,mode:'test'});
- const product=await patternListing(id,{published:true});
+ const product=await patternListing(id,{published:true,diagnostic});
  if(product.listing.sellerUid===user.uid)throw fail('본인 도안은 구매할 수 없습니다.',409);
  await patternFile(product);
  const orderRef=ref(collections.orders,patternId(user.uid,id)),saleRef=ref(collections.sales,patternId(user.uid,id));
@@ -398,7 +400,7 @@ async function buyPattern(user,id,res){
    throw fail('기존 구매 기록을 관리자에게 확인해주세요.',409);
   }
   const listing=nowProduct.data();
-  if(!listing||listing.status!=='published'||listing.content!==product.listing.content
+  if(!listing||!(listing.status==='published'||diagnostic&&listing.status==='diagnostic'&&id.startsWith('diag_'))||listing.content!==product.listing.content
    ||listing.sellerUid!==product.listing.sellerUid||listing.sourceId!==product.listing.sourceId)
    throw fail('도안 가격 또는 공개 상태가 변경됐습니다.',409);
   const time=now(),parts=revenue7030(product.price);
