@@ -10,6 +10,7 @@ import {mountKitAdmin} from './kit-admin.js';
 import {mountFinanceAdmin} from './finance-admin.js';
 import {mountFirebaseCommerceHealth} from './firebase-commerce-health-admin.mjs';
 import {mountFirebaseCommerceDiagnostics} from './firebase-commerce-diagnostics-admin.mjs';
+import {mountFirebaseCommerceCutover} from './firebase-commerce-cutover-admin.mjs';
 import {isFirebaseAdminReadAction} from './admin-local-actions.mjs';
 import {capabilities} from './member-core.mjs';
 import {filterMembers,maskEmail,adminSections} from './admin-core.mjs';
@@ -44,6 +45,10 @@ async function dashboard(target,mine){target.innerHTML='<div class="admin-loadin
  testTarget.id='admin-firebase-commerce-diagnostics';
  diagnostic.after(testTarget);
  mountFirebaseCommerceDiagnostics(testTarget,context.Firebase.user);
+ const switchTarget=document.createElement('div');
+ switchTarget.id='admin-firebase-commerce-cutover';
+ testTarget.after(switchTarget);
+ mountFirebaseCommerceCutover(switchTarget,context.Firebase.user);
 }
 function listFrame(target){target.innerHTML=`<div class="admin-heading"><span>MEMBERS</span><h1>회원 관리</h1><p>구매자·판매자·관리자의 회원정보와 운영 권한을 관리합니다.</p><button class="admin-button primary" data-create-administrator>＋ 관리자 추가</button></div><div class="admin-card"><form id="admin-member-search" class="admin-search"><input name="query" type="search" maxlength="100" aria-label="회원 검색" placeholder="이름, 이메일, 작가명 또는 UID 검색" value="${E(filters.query)}"><button class="admin-button primary" type="submit">검색</button></form><div class="admin-member-filters"><label>가입 유형<select id="admin-role"><option value="all">전체 회원</option><option value="admin">관리자</option><option value="buyer">구매자</option><option value="seller">판매자</option></select></label><label>판매자 상태<select id="admin-status"><option value="all">전체 상태</option>${Object.entries(statuses).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></label><label>정렬<select id="admin-sort"><option value="newest">최근 가입순</option><option value="name">이름순</option></select></label><button class="admin-button" id="admin-members-refresh">새로고침 ↻</button></div><p class="admin-load-state" id="admin-members-loading" role="status"></p><div id="admin-members-result"></div></div>`;
  target.querySelector('[data-create-administrator]').onclick=createAdministrator;target.querySelector('#admin-role').value=filters.role;target.querySelector('#admin-status').value=filters.status;target.querySelector('#admin-sort').value=filters.sort;

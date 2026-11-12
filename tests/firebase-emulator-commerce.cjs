@@ -38,7 +38,7 @@ function kitDoc(id,stock,version){
   sizes:['M'],colors:['Brown'],extras:[],images:['/assets/kits/beanie.webp'],
   payoutSellerUid:'__platform__',payoutSellerName:'MOAKIT',
   category:'accessory',description:'fixture only'};
- return {id,status:'published',stock,version,price:row.price,shippingFee:row.shippingFee,
+ return {id,status:'published',stock,soldOut:false,salesCount:0,version,price:row.price,shippingFee:row.shippingFee,
   createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),
   dataJson:JSON.stringify(row),source:'firebase-commerce',syncedAt:new Date().toISOString()};
 }
@@ -74,19 +74,21 @@ async function run(){
  const bought=await api('orders','checkout',checkout,buyer.token);
  assert.equal(bought.status,201,JSON.stringify(bought.data));
  assert.equal(bought.data.order.total,50000);
- assert.equal((await db.doc('moakitKits/'+kit).get()).data().stock,1);
+ assert.equal((await db.doc('moakitKits/'+kit).get()).data().stock,3,'numeric stock must not change');
+ assert.equal((await db.doc('moakitKits/'+kit).get()).data().salesCount,2);
  assert.equal((await db.doc('moakitOrders/kit_'+checkoutKey).get()).data().charged,0);
  const repeat=await api('orders','checkout',checkout,buyer.token);
  assert.equal(repeat.status,200,JSON.stringify(repeat.data));
- assert.equal((await db.doc('moakitKits/'+kit).get()).data().stock,1);
+ assert.equal((await db.doc('moakitKits/'+kit).get()).data().salesCount,2);
  const changed=await api('orders','checkout',{...checkout,shipping:{...shipping,address:'Different road'}},buyer.token);
  assert.equal(changed.status,409);
  const cancel=await api('orders','cancel',{id:checkoutKey,version:bought.data.order.version},buyer.token);
  assert.equal(cancel.status,200,JSON.stringify(cancel.data));
+ assert.equal((await db.doc('moakitKits/'+kit).get()).data().salesCount,0);
  assert.equal((await db.doc('moakitKits/'+kit).get()).data().stock,3);
  const doubleCancel=await api('orders','cancel',{id:checkoutKey,version:bought.data.order.version},buyer.token);
  assert.equal(doubleCancel.status,409);
- assert.equal((await db.doc('moakitKits/'+kit).get()).data().stock,3);
+ assert.equal((await db.doc('moakitKits/'+kit).get()).data().salesCount,0);
  const sales=(await db.collection('moakitSales').where('buyerUid','==',buyer.uid).get()).docs;
  assert.equal(sales.length,1);assert.equal(sales[0].data().status,'cancelled');
  await db.doc('moakitKits/'+kit).update({stock:1,version:4});
@@ -95,8 +97,12 @@ async function run(){
   api('orders','checkout',{...one,checkoutKey:uuid()},buyer.token),
   api('orders','checkout',{...one,checkoutKey:uuid()},buyer2.token)
  ]);
- assert.deepEqual(race.map(x=>x.status).sort((a,b)=>a-b),[201,409],JSON.stringify(race.map(x=>x.data)));
- assert.equal((await db.doc('moakitKits/'+kit).get()).data().stock,0);
+ assert.deepEqual(race.map(x=>x.status).sort((a,b)=>a-b),[201,201],JSON.stringify(race.map(x=>x.data)));
+ assert.equal((await db.doc('moakitKits/'+kit).get()).data().stock,1,'stock stays unchanged');
+ assert.equal((await db.doc('moakitKits/'+kit).get()).data().salesCount,2);
+ await db.doc('moakitKits/'+kit).update({soldOut:true});
+ const unavailable=await api('orders','checkout',{...one,checkoutKey:uuid()},buyer.token);
+ assert.equal(unavailable.status,409,'admin soldOut stops new orders');
  const prod=await addPattern(seller,'one');
  let file=await api('pattern','download',{id:prod.id},buyer.token);
  assert.equal(file.status,403);
@@ -107,6 +113,13 @@ async function run(){
  const saleId='pattern_'+buyer.uid+'_'+prod.id;
  const patternSale=(await db.doc('moakitSales/'+saleId).get()).data();
  assert.equal(patternSale.sellerShare,17500);assert.equal(patternSale.platformShare,7500);
+ assert.equal((await db.doc('moakitOrders/'+saleId).get()).data().storagePath,prod.path);
+ // Even when the seller changes metadata, the buyer retains the exact PDF purchased.
+ await db.doc('moakitUsers/'+seller.uid+'/works/work_one').update({
+  content:JSON.stringify({file:{path:'moakit/private/'+seller.uid+'/work_one/'+uuid()+'.pdf',
+   name:'changed.pdf',size:prod.bytes.length}})
+ });
+
  file=await api('pattern','download',{id:prod.id},buyer.token);
  assert.equal(file.status,200,JSON.stringify(file.data));
  assert.ok(file.data.equals(prod.bytes));
@@ -161,6 +174,16 @@ async function run(){
   headers:{Authorization:'Bearer '+buyer.token,'Content-Type':'application/json','x-moakit-staging':'1'},
   body:JSON.stringify({action:'run',suite:'kit'})});
  assert.equal(forbidden.status,403,'non-admin diagnostic must be denied');
-  console.log('EMULATOR E2E PASS: KIT checkout, idempotency, inventory restore, concurrent stock, pattern PDF, refund, 70:30 settlement and double claim');
+ const buyerSwitch=await api('cutover','enable',{confirmation:'FIREBASE'},buyer.token);
+ assert.equal(buyerSwitch.status,403,'buyer must not change global commerce route');
+ const adminSwitch=await api('cutover','enable',{confirmation:'FIREBASE'},admin.token);
+ assert.equal(adminSwitch.status,200,JSON.stringify(adminSwitch.data));
+ assert.equal(adminSwitch.data.active,true);
+ assert.equal((await api('status')).data.active,true);
+ const returnToLegacy=await api('cutover','disable',{confirmation:'WORK'},admin.token);
+ assert.equal(returnToLegacy.status,200,JSON.stringify(returnToLegacy.data));
+ assert.equal((await api('status')).data.active,false);
+
+  console.log('EMULATOR E2E PASS: KIT salesCount, sold-out gate, frozen Firebase Storage PDF paths, refunds, 70:30 settlements');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});

@@ -4,11 +4,11 @@
 const {onRequest}=require('firebase-functions/v2/https');
 const {initializeApp,getApps}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth');
-const {getFirestore}=require('firebase-admin/firestore');
+const {getFirestore,FieldValue}=require('firebase-admin/firestore');
 const {getStorage}=require('firebase-admin/storage');
 const {createHash,randomUUID}=require('node:crypto');
 const core=require('./commerce-core.cjs');
-const {fail,validId,amount,revenue7030,shippingInput,itemIds,kitQuote,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale}=core;
+const {fail,validId,amount,revenue7030,shippingInput,itemIds,kitQuote,kitSoldOut,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale}=core;
 if(!getApps().length)initializeApp({storageBucket:'studio-1613487721-b043c.firebasestorage.app'});
 const db=getFirestore(),bucket=getStorage().bucket();
 const now=()=>new Date().toISOString();
@@ -26,6 +26,7 @@ function parseKit(snapshot){
  try{data=JSON.parse(d.dataJson);}catch{throw fail('KIT 상품 자료가 손상됐습니다.',409);}
  if(!data||Number(data.price)!==d.price)throw fail('KIT 가격 자료가 맞지 않습니다.',409);
  return {id:snapshot.id,status:d.status,stock:d.stock,version:d.version,
+  soldOut:kitSoldOut(d),salesCount:Number.isSafeInteger(d.salesCount)?d.salesCount:0,
   createdAt:d.createdAt,updatedAt:d.updatedAt,data};
 }
 function orderView(row,shipping){
@@ -89,7 +90,7 @@ function filterCatalog(items,q,admin){
  const level=String(q.level||'all');
  const min=q.minPrice===undefined?'':String(q.minPrice),max=q.maxPrice===undefined?'':String(q.maxPrice);
  let filtered=items.filter(k=>k.status!=='deleted'&&(admin||k.status==='published')
-  &&(!admin||state==='all'||state==='soldout'&&k.status==='published'&&k.stock===0||state===k.status)
+  &&(!admin||state==='all'||state==='soldout'&&k.status==='published'&&k.soldOut||state==='published'&&k.status==='published'&&!k.soldOut||state===k.status&&state!=='published')
   &&(category==='all'||k.data.category===category)
   &&(level==='all'||Number(k.data.level)===Number(level))
   &&(tab==='all'||tab==='ai'||tab==='popular'&&k.data.popular||tab==='weekly'&&k.data.weekly)
@@ -99,7 +100,7 @@ function filterCatalog(items,q,admin){
  filtered.sort((a,b)=>sort==='newest'?String(b.createdAt).localeCompare(String(a.createdAt)):
   sort==='price-low'?a.data.price-b.data.price:sort==='price-high'?b.data.price-a.data.price:
   sort==='name'?String(a.data.title).localeCompare(String(b.data.title),'ko'):
-  sort==='stock-low'&&admin?a.stock-b.stock:
+  sort==='sales-high'&&admin?b.salesCount-a.salesCount:
   (a.data.rank||0)-(b.data.rank||0)||String(b.createdAt).localeCompare(String(a.createdAt)));
  const total=filtered.length,pages=Math.max(1,Math.ceil(total/20)),p=Math.min(page,pages);
  return {kits:filtered.slice((p-1)*20,p*20),total,page:p,pages,pageSize:20,nextCursor:null,source:'firebase'};
@@ -135,12 +136,28 @@ async function catalogRoute(req,res){
    const r=ref(collections.kits,id),old=await tx.get(r);
    if(old.exists&&input.version!==old.data().version)throw fail('KIT 정보가 변경됐습니다.',409);
    if(!old.exists&&input.version&&input.version!==1)throw fail('KIT 버전을 확인해주세요.',409);
-   const stamp=now(),row={id,status:val.status,stock:val.stock,
-    version:(old.exists?old.data().version:0)+1,price:val.data.price,
+   const previous=old.exists?old.data():{};
+   const soldOut=typeof val.soldOut==='boolean'?val.soldOut:
+     typeof previous.soldOut==='boolean'?previous.soldOut:val.stock===0;
+   const stamp=now(),row={id,status:val.status,stock:previous.stock??val.stock,
+    soldOut,salesCount:Number.isSafeInteger(previous.salesCount)?previous.salesCount:0,
+    version:(old.exists?previous.version:0)+1,price:val.data.price,
     shippingFee:val.data.shippingFee||0,dataJson:JSON.stringify(val.data),
     createdAt:old.exists?old.data().createdAt:stamp,updatedAt:stamp,syncedAt:stamp,
     source:'firebase-commerce'};
    tx.set(r,row);return parseKit({exists:true,id,data:()=>row});
+  });
+  return json(res,{kit:result});
+ }
+ if(input.action==='setSoldOut'){
+  if(typeof input.soldOut!=='boolean'||!Number.isInteger(input.version))
+   throw fail('품절 상태를 확인해주세요.');
+  const result=await db.runTransaction(async tx=>{
+   const r=ref(collections.kits,id),old=await tx.get(r);
+   if(!old.exists||old.data().version!==input.version)throw fail('KIT 상태가 변경되었습니다.',409);
+   if(old.data().status==='deleted')throw fail('삭제된 상품입니다.',409);
+   tx.update(r,{soldOut:input.soldOut,version:old.data().version+1,updatedAt:now()});
+   return {id,soldOut:input.soldOut};
   });
   return json(res,{kit:result});
  }
@@ -228,12 +245,12 @@ async function checkoutKit(user,input,res,{diagnostic=false}={}){
    charged:0,mode:'test',status:'received',verification:'verified',source:'firebase-checkout',
    createdAt:timestamp,updatedAt:timestamp,version:1,detail:JSON.stringify(quote.items.map(x=>({
     id:x.id,title:x.title,quantity:x.quantity,subtotal:x.subtotal}))).slice(0,12000),
-   itemsJson:JSON.stringify(quote.items),carrier:'',tracking:'',stockRestored:false,
+   itemsJson:JSON.stringify(quote.items),carrier:'',tracking:'',inventoryPolicy:'availability-only',salesCountReversed:false,
    checkoutFingerprint:fingerprint};
   tx.create(orderRef,receipt);
   tx.create(privateRef,{buyerUid:user.uid,shipping,createdAt:timestamp});
   for(const kit of kits)tx.update(ref(collections.kits,kit.id),{
-   stock:kit.stock-quote.quantities[kit.id],version:kit.version+1,updatedAt:timestamp});
+   salesCount:FieldValue.increment(quote.quantities[kit.id])});
   for(const sale of kitSales(id,user.uid,quote.items,timestamp))tx.create(ref(collections.sales,sale.id),sale);
   return {order:receipt,existing:false};
  },{maxAttempts:5});
@@ -275,7 +292,9 @@ async function changeKit(user,input,res){
    throw fail('택배사와 송장번호를 확인해주세요.');
   const timestamp=now(),patch={status:target,carrier,tracking,version:order.version+1,updatedAt:timestamp};
   if(target==='cancelled'){
-   if(order.stockRestored)throw fail('이미 복원된 주문입니다.',409);
+   if(order.inventoryPolicy==='availability-only'&&order.salesCountReversed
+    ||order.inventoryPolicy!=='availability-only'&&order.stockRestored)
+    throw fail('이미 취소된 주문입니다.',409);
    let items;try{items=JSON.parse(order.itemsJson);}catch{throw fail('주문 상품 내역을 확인해주세요.',409);}
    const ids=[...new Set(items.map(x=>x.id))];
    const counts=Object.fromEntries(ids.map(id=>[id,items.filter(x=>x.id===id).reduce((n,x)=>n+x.quantity,0)]));
@@ -286,13 +305,19 @@ async function changeKit(user,input,res){
    const claimed=await settlementsInTx(tx,sales.map(s=>s.data().sellerUid));
    if(claimedBySettlements(claimed,saleIDs))throw fail('정산 검토서에 포함된 주문은 취소할 수 없습니다.',409);
    kitDocs.forEach((snap,i)=>{
-    const newStock=snap.data().stock+counts[ids[i]];
-    if(newStock>100000)throw fail('복원할 재고 수량을 확인해주세요.',409);
-    tx.update(snap.ref,{stock:newStock,version:snap.data().version+1,updatedAt:timestamp});
+    if(order.inventoryPolicy==='availability-only'){
+     const sold=Number.isSafeInteger(snap.data().salesCount)?snap.data().salesCount:0;
+     tx.update(snap.ref,{salesCount:Math.max(0,sold-counts[ids[i]])});
+    }else{
+     const newStock=snap.data().stock+counts[ids[i]];
+     if(newStock>100000)throw fail('기존 주문 재고 복원량을 확인해주세요.',409);
+     tx.update(snap.ref,{stock:newStock,version:snap.data().version+1,updatedAt:timestamp});
+    }
    });
    sales.forEach(s=>tx.update(s.ref,{status:'cancelled',refund:s.data().amount,
     net:0,sellerShare:0,platformShare:0,reviewedAt:timestamp}));
-   patch.stockRestored=true;
+   if(order.inventoryPolicy==='availability-only')patch.salesCountReversed=true;
+   else patch.stockRestored=true;
   }
   tx.update(orderRef,patch);
   return {...order,...patch};
@@ -342,7 +367,7 @@ async function patternFile(pattern){
  if(meta.contentType!=='application/pdf'||!Number.isInteger(Number(meta.size))||
   Number(meta.size)<1||Number(meta.size)>10485760)throw fail('PDF 원본이 유효하지 않습니다.',409);
  const filename=String(content.file?.name||'pattern.pdf').replace(/[\r\n"\\/]/g,'_').slice(0,150);
- return {file,filename,size:Number(meta.size)};
+ return {file,path,filename,size:Number(meta.size)};
 }
 async function trustedPurchase(uid,id){
  const order=await ref(collections.orders,patternId(uid,id)).get();
@@ -362,7 +387,7 @@ async function trustedPurchase(uid,id){
 function purchaseView(row){
  return {patternId:row.productId,buyerUid:row.buyerUid,sellerUid:row.sellerUid,
   sellerName:row.sellerName,title:row.title,amount:row.amount,mode:'test',
-  status:'test_completed',createdAt:row.createdAt,
+  status:'test_completed',createdAt:row.createdAt,storagePath:row.storagePath||'',
   orderNumber:'MOA-'+String(row.id||'').slice(-12).toUpperCase()};
 }
 async function library(user,res){
@@ -390,7 +415,7 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
  if(existing)return json(res,{purchase:purchaseView(existing),financeRecorded:true,mode:'test'});
  const product=await patternListing(id,{published:true,diagnostic});
  if(product.listing.sellerUid===user.uid)throw fail('본인 도안은 구매할 수 없습니다.',409);
- await patternFile(product);
+ const storedFile=await patternFile(product);
  const orderRef=ref(collections.orders,patternId(user.uid,id)),saleRef=ref(collections.sales,patternId(user.uid,id));
  const order=await db.runTransaction(async tx=>{
   const old=await tx.get(orderRef),oldSale=await tx.get(saleRef),nowProduct=await tx.get(product.snap.ref);
@@ -408,7 +433,9 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
    productId:id,sellerUid:listing.sellerUid,sellerName:String(product.content.sellerName||'작가').slice(0,80),
    title:String(product.content.title||'도안').slice(0,150),amount:product.price,
    quantity:1,charged:0,mode:'test',status:'recorded',verification:'verified',
-   createdAt:time,detail:'',source:'firebase-checkout'};
+   createdAt:time,detail:'',source:'firebase-checkout',
+   storagePath:storedFile.path,storageFileName:storedFile.filename,
+   storageWorkId:listing.sourceId,storageBucket:bucket.name};
   const sale={id:saleRef.id,orderId:orderRef.id,sourceOrderId:id,buyerUid:user.uid,
    sellerUid:receipt.sellerUid,sellerName:receipt.sellerName,kind:'pattern',title:receipt.title,
    productId:id,amount:parts.total,net:parts.total,refund:0,discount:0,
@@ -423,9 +450,26 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
 async function downloadPattern(user,id,res){
  const entitled=await trustedPurchase(user.uid,id);
  if(!entitled)throw fail('구매가 확인되지 않은 도안입니다.',403);
- const product=await patternListing(id);
- if(product.listing.sellerUid!==entitled.sellerUid)throw fail('도안 작가 정보가 변경됐습니다.',409);
- const {file,filename}=await patternFile(product);
+ let file,filename;
+ if(entitled.storagePath){
+  const prefix='moakit/private/'+entitled.sellerUid+'/'+entitled.storageWorkId+'/';
+  const basename=entitled.storagePath.slice(prefix.length);
+  if(!validId(entitled.sellerUid)||!validId(entitled.storageWorkId)
+   ||typeof entitled.storagePath!=='string'||!entitled.storagePath.startsWith(prefix)
+   ||entitled.storageBucket!==bucket.name
+   ||!new RegExp('^[A-Za-z0-9-]+[.]pdf$','i').test(basename))
+   throw fail('구매 내역의 Firebase Storage 경로가 잘못됐습니다.',409);
+  file=bucket.file(entitled.storagePath);
+  const [meta]=await file.getMetadata();
+  if(meta.contentType!=='application/pdf'||Number(meta.size)<1||Number(meta.size)>10485760)
+   throw fail('원본 PDF 파일이 유효하지 않습니다.',409);
+  filename=String(entitled.storageFileName||'pattern.pdf').replace(/[\r\n"\\/]/g,'_').slice(0,150);
+ }else{
+  // Existing verified purchases from before the snapshot retain their original lookup.
+  const product=await patternListing(id);
+  if(product.listing.sellerUid!==entitled.sellerUid)throw fail('도안 작가 정보가 변경됐습니다.',409);
+  ({file,filename}=await patternFile(product));
+ }
  res.status(200).set('Content-Type','application/pdf')
   .set('Content-Disposition','attachment; filename="pattern.pdf"; filename*=UTF-8\'\''+encodeURIComponent(filename))
   .set('Cache-Control','private,no-store').set('X-Content-Type-Options','nosniff');
@@ -506,6 +550,35 @@ async function financeRoute(req,res){
  },{maxAttempts:5});
  return json(res,{settlement:row},201);
 }
+// Explicit administrator-controlled switch. The previous Work order records are
+// retained and can still be viewed from the legacy tabs after activation.
+async function cutoverRoute(req,res){
+ if(req.method!=='POST')throw fail('전환 요청은 POST만 허용합니다.',405);
+ const admin=await adminSession(req);
+ const action=req.body?.action;
+ const expected=action==='enable'?'FIREBASE':action==='disable'?'WORK':'';
+ if(!expected||req.body?.confirmation!==expected)
+  throw fail('전환 확인을 다시 확인해주세요.',400);
+ if(action==='enable'){
+  const kits=await db.collection(collections.kits).where('status','==','published').limit(1).get();
+  const patterns=await db.collection(collections.patterns).where('status','==','published').limit(1).get();
+  if(kits.empty||patterns.empty)throw fail('Firebase에 공개 KIT와 도안이 있어야 전환할 수 있습니다.',409);
+  if(process.env.FUNCTIONS_EMULATOR!=='true'){
+   try{await bucket.getMetadata();}catch{throw fail('Firebase Storage 연결을 확인해주세요.',409);}
+  }
+ }
+ const stateRef=ref('moakitSettings','commerce');
+ const result=await db.runTransaction(async tx=>{
+  const old=await tx.get(stateRef),current=old.data()||{};
+  const next=action==='enable';
+  if(current.firebaseEnabled===next&&current.schemaVersion===1)return next;
+  tx.set(stateRef,{...current,firebaseEnabled:next,schemaVersion:1,
+   commerceRouteUpdatedAt:now(),commerceRouteUpdatedBy:admin.uid},{merge:true});
+  return next;
+ });
+ return json(res,{active:result,mode:result?'firebase':'legacy',
+  notice:'기존 구매 기록은 Work 조회 경로에 그대로 보존됩니다.'});
+}
 const runDiagnostics=require('./commerce-diagnostics.cjs')({
  db,bucket,ref,collections,now,adminSession,active,
  checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
@@ -519,6 +592,7 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   const resource=String(req.query.resource||'');
   if(resource==='status')return await statusRoute(req,res);
   if(resource==='health')return await healthRoute(req,res);
+  if(resource==='cutover')return await cutoverRoute(req,res);
   // Staged requests are allowed only for authenticated administrators.
   if(!await active()){
    const staging=req.headers['x-moakit-staging']==='1';

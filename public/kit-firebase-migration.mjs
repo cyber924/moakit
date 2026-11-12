@@ -107,6 +107,8 @@ export async function migrateFirebaseKits(onProgress=()=>{}){
    const existing=await kitMirrorRead(next.id);
    if(existing){
     if(existing.kit.source!=='work-d1')throw Error('Firebase에 다른 출처의 상품이 있어 수정하지 않았습니다.');
+    if(typeof existing.kit.soldOut==='boolean'||Number.isSafeInteger(existing.kit.salesCount))
+     throw Error('Firebase 판매 상태 또는 판매량 기록이 있어 기존 Work 상품으로 덮어쓸 수 없습니다.');
     if(!compare(existing.kit,next).length){stats.unchanged++;continue;}
     const u=new URL(path);u.searchParams.set('currentDocument.updateTime',existing.updateTime);
     await request(u.toString(),{method:'PATCH',body:{fields:encodeFields(next)}});

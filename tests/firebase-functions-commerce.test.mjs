@@ -16,12 +16,13 @@ test('70:30 settlement uses integer won and exact totals',()=>{
  assert.throws(()=>revenue7030(-1));
  assert.throws(()=>revenue7030(0.5));
 });
-test('KIT quote ignores submitted pricing and enforces current stock',()=>{
+test('KIT quote ignores submitted pricing and enforces sold-out flag only',()=>{
  const q=kitQuote([{...line,price:1,total:1}],[kit]);
  assert.equal(q.items.length,1);
  assert.equal(q.total,kit.data.price*2+kit.data.shippingFee);
  assert.equal(q.quantities[kit.id],2);
- assert.throws(()=>kitQuote([{...line,quantity:4}],[kit]),/재고/);
+ assert.equal(kitQuote([{...line,quantity:4}],[kit]).items[0].quantity,4);
+ assert.throws(()=>kitQuote([line],[{...kit,soldOut:true}]),/품절/);
  assert.throws(()=>kitQuote([{...line,version:6}],[kit]),/변경/);
  assert.throws(()=>kitQuote([{...line,color:'invalid'}],[kit]));
  assert.equal(itemIds([line,line]).length,1);

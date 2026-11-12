@@ -4,6 +4,7 @@ on:
     branches:
       - firebase-commerce-hardening-20261112
       - firebase-diagnostic-transactions-20261112
+      - simplify-commerce-no-stock-20261112
   pull_request:
     branches:
       - main
@@ -23,11 +24,15 @@ jobs:
       - name: Validate Cloud Functions and pure transaction helpers
         run: |
           node --check functions/index.cjs
+          node --check public/kits.js
+          node --check public/kit-admin.js
+          node --check public/kit-core.mjs
+          node --check public/commerce.js
           node --check functions/commerce-core.cjs
           node --check functions/commerce-diagnostics.cjs
           node --check public/firebase-commerce-diagnostics-admin.mjs
           node --check tests/firebase-emulator-commerce.cjs
-          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs tests/firebase-admin-diagnostics.test.mjs
+          node --test tests/firebase-functions-commerce.test.mjs tests/firebase-commerce-hardening.test.mjs tests/firebase-commerce-cutover.test.mjs tests/firebase-admin-diagnostics.test.mjs tests/firebase-simple-commerce.test.mjs
       - name: Install backend dependencies and verify entry point
         run: |
           npm --prefix functions install --ignore-scripts --no-audit --no-fund

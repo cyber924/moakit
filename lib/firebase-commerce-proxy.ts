@@ -1,6 +1,6 @@
 // Stable project URL only; no Vercel secret, arbitrary proxy target or client-controlled host.
 const ENDPOINT='https://asia-northeast3-studio-1613487721-b043c.cloudfunctions.net/moakitCommerce';
-type Resource='status'|'health'|'kits'|'orders'|'pattern'|'finance'|'diagnostics';
+type Resource='status'|'health'|'kits'|'orders'|'pattern'|'finance'|'diagnostics'|'cutover';
 const makeUrl=(request:Request,resource:Resource)=>{
  const incoming=new URL(request.url),upstream=new URL(ENDPOINT);
  for(const [key,value] of incoming.searchParams)if(key!=='resource')upstream.searchParams.append(key,value);
@@ -22,7 +22,7 @@ export async function proxyFirebaseCommerce(request:Request,resource:Resource,{r
  const status=requireActivation?await firebaseCommerceStatus():null;
  if(requireActivation&&!status?.active)
   return Response.json({error:'Firebase 상거래 연결이 아직 검증되지 않았습니다.'},{status:503});
- if(staging&&(resource!=='diagnostics'||request.method!=='POST'))
+ if(staging&&(!['diagnostics','cutover'].includes(resource)||request.method!=='POST'))
   return Response.json({error:'관리자 테스트 요청이 아닙니다.'},{status:405});
  const headers=new Headers();
  for(const key of ['authorization','content-type','accept'])if(request.headers.has(key))
