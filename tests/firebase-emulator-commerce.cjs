@@ -110,7 +110,7 @@ async function run(){
  file=await api('pattern','download',{id:prod.id},buyer.token);
  assert.equal(file.status,200,JSON.stringify(file.data));
  assert.ok(file.data.equals(prod.bytes));
- assert.match(file.headers.get('content-disposition'),'attachment');
+ assert.match(file.headers.get('content-disposition'),/attachment/);
  const strangers=await api('pattern','download',{id:prod.id},buyer2.token);
  assert.equal(strangers.status,403);
  let library=await api('pattern','library',{},buyer.token);
