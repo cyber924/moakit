@@ -4,7 +4,7 @@ const E=window.MoaUI.escapeHtml;
 async function shop(action,values={},blob=false,{legacy=false}={}){
  const user=window.MoaAccount?.user;if(!user)throw Error('로그인 후 이용해주세요.');const uid=user.uid;
  const direct=!legacy&&await commerceMode()==='firebase';
- const r=await fetch('/api/shop',{method:'POST',headers:{Authorization:'Bearer '+await user.getIdToken(),'Content-Type':'application/json',...(direct?{'X-MOAKIT-FIREBASE-COMMERCE':'1'}:{})},body:JSON.stringify({action,...values}),signal:AbortSignal.timeout(45000)});
+ const r=await fetch('/api/shop',{method:'POST',headers:{Authorization:'Bearer '+await user.getIdToken(),'Content-Type':'application/json',...(direct?{'X-MOAKIT-FIREBASE-COMMERCE':'1'}:{}),...(legacy?{'X-MOAKIT-LEGACY-VIEW':'1'}:{})},body:JSON.stringify({action,...values}),signal:AbortSignal.timeout(45000)});
  if(window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');
  if(!r.ok){const d=await r.json().catch(()=>({}));throw Error(d.error||'구매 요청에 실패했어요.');}return blob?r.blob():r.json();
 }
