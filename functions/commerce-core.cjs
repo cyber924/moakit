@@ -24,13 +24,13 @@ function itemIds(lines){
   throw fail('KIT와 수량을 확인해주세요.');
  return [...new Set(lines.map(line=>line.id))];
 }
-function kitQuote(lines,kits,{preview=false}={}){
+function kitQuote(lines,kits,{preview=false,diagnostic=false}={}){
  const ids=itemIds(lines),byId=new Map(kits.map(x=>[x.id,x]));
  if(ids.length!==byId.size)throw fail('상품 목록이 일치하지 않습니다.',409);
  const quantities=Object.fromEntries(ids.map(id=>[id,0]));
  const items=lines.map(line=>{
   const kit=byId.get(line.id);
-  if(!kit||kit.status!=='published')throw fail('판매 중인 KIT가 아닙니다.',409);
+  if(!kit||!(kit.status==='published'||diagnostic&&kit.status==='diagnostic'&&kit.id.startsWith('diag_')))throw fail('판매 중인 KIT가 아닙니다.',409);
   if(!Number.isSafeInteger(kit.stock)||kit.stock<0||!Number.isSafeInteger(kit.version))throw fail('KIT 재고 정보 오류',409);
   if(!preview&&line.version!==kit.version)throw fail('상품 정보가 변경됐습니다. 다시 확인해주세요.',409);
   const data=kit.data,extraIDs=line.extras;
