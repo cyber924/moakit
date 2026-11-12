@@ -25,7 +25,9 @@ test('KIT pricing comes from stored catalog, not user-submitted totals',()=>{
  const q=quoteKits([{id:product.id,quantity:2,version:3,size:v.sizes[0],color:v.colors[0],extras:[],total:1,price:1}],[product]);
  assert.equal(q.total,v.price*2+v.shippingFee);
  assert.equal(q.quantities[product.id],2);
- assert.throws(()=>quoteKits([{id:product.id,quantity:11,version:3,size:v.sizes[0],color:v.colors[0],extras:[]}],[product]));
+ assert.equal(quoteKits([{id:product.id,quantity:11,version:3,size:v.sizes[0],color:v.colors[0],extras:[]}],[product]).items[0].quantity,11);
+ assert.throws(()=>quoteKits([{id:product.id,quantity:21,version:3,size:v.sizes[0],color:v.colors[0],extras:[]}],[product]));
+ assert.throws(()=>quoteKits([{id:product.id,quantity:1,version:3,size:v.sizes[0],color:v.colors[0],extras:[]}],[{...product,soldOut:true}]));
 });
 test('KIT order and cancellation are all-or-nothing Firestore transaction code paths',()=>{
  assert.match(kits,/await begin\(\)/);
