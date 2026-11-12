@@ -506,6 +506,11 @@ async function financeRoute(req,res){
  },{maxAttempts:5});
  return json(res,{settlement:row},201);
 }
+const runDiagnostics=require('./commerce-diagnostics.cjs')({
+ db,bucket,ref,collections,now,adminSession,active,
+ checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
+ refundPattern,financeRoute
+});
 exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeoutSeconds:60,
  maxInstances:10,invoker:'public'},async(req,res)=>{
  try{
@@ -524,6 +529,7 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   if(resource==='orders')return await ordersRoute(req,res);
   if(resource==='pattern')return await patternRoute(req,res);
   if(resource==='finance')return await financeRoute(req,res);
+  if(resource==='diagnostics')return await runDiagnostics(req,res);
   throw fail('요청한 기능을 찾지 못했습니다.',404);
  }catch(e){
   const status=Number.isInteger(e?.status)&&e.status>=400&&e.status<600?e.status:502;
