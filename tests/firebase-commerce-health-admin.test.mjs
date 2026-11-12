@@ -32,10 +32,13 @@ test('failed admin authorization does not silently pass',async()=>{
 test('unexpected API body fails closed',async()=>{
  await assert.rejects(checkFirebaseCommerceHealth(user,async()=>Response.json({active:false})),/예상과 다른/);
 });
-test('existing dashboard includes diagnostic while leaving Work server untouched',()=>{
+test('dashboard uses read-only traffic lights and hides emergency rollback under advanced settings',()=>{
  const admin=readFileSync(new URL('../public/admin.js',import.meta.url),'utf8');
  const routing=readFileSync(new URL('../server/backend-routing.mjs',import.meta.url),'utf8');
- assert.ok(admin.includes("mountFirebaseCommerceHealth(diagnostic,context.Firebase.user);"));
- assert.ok(admin.includes("diagnostic.id='admin-firebase-commerce-health'"));
+ assert.ok(admin.includes("mountAdminOperationsHealth(healthTarget,context.Firebase.user);"));
+ assert.ok(admin.includes("advanced.className='admin-ops-advanced'"));
+ assert.ok(admin.includes("mountFirebaseCommerceCutover(advanced.querySelector('#admin-firebase-commerce-cutover')"));
+ assert.ok(!admin.includes("mountFirebaseCommerceDiagnostics(testTarget,context.Firebase.user);"));
+ assert.ok(!admin.includes("mountFirebaseCommerceHealth(diagnostic,context.Firebase.user);"));
  assert.ok(routing.includes('BACKEND_ORIGIN'));
 });
