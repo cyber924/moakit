@@ -36,52 +36,51 @@ module.exports=function createDiagnostics({
   const itemData={title:'[진단 전용] KIT',price:25000,shippingFee:0,
    sizes:['M'],colors:['Brown'],extras:[],images:[],category:'accessory',
    payoutSellerUid:'__platform__',payoutSellerName:'MOAKIT',
-   description:'Admin-only diagnostic; not for sale'};
-  await kitRef.create({id,status:'diagnostic',stock:2,version:1,
-   price:25000,shippingFee:0,dataJson:JSON.stringify(itemData),
+   description:'Nonpublic diagnostic only'};
+  await kitRef.create({id,status:'diagnostic',stock:0,soldOut:false,salesCount:0,
+   version:1,price:25000,shippingFee:0,dataJson:JSON.stringify(itemData),
    createdAt:date,updatedAt:date,syncedAt:date,source:'firebase-diagnostic'});
   const line={id,version:1,quantity:1,size:'M',color:'Brown',extras:[]};
   const checkoutKey=randomUUID(),orderRef=scope.doc(ref(collections.orders,'kit_'+checkoutKey));
   scope.doc(ref(collections.private,'kit_'+checkoutKey));
   scope.doc(ref(collections.sales,'fc_kit_'+checkoutKey+'_0'));
   const input={checkoutKey,items:[line],shipping:testShipping(),accepted:true};
-  const first=capture();
-  await checkoutKit(user,input,first,{diagnostic:true});
-  check(steps,'전용 KIT 테스트 주문',first.statusCode===201&&first.body.order.total===25000);
-  let kit=await kitRef.get();
-  let order=await orderRef.get();
-  check(steps,'재고 2 → 1 · 테스트 결제 0원',
-   kit.data()?.stock===1&&order.data()?.charged===0&&order.data()?.mode==='test');
-  const replay=capture();
-  await checkoutKit(user,input,replay,{diagnostic:true});
+  const first=capture();await checkoutKit(user,input,first,{diagnostic:true});
+  check(steps,'비공개 KIT 테스트 주문',first.statusCode===201&&first.body.order.total===25000);
+  let kit=await kitRef.get(),order=await orderRef.get();
+  check(steps,'판매량 0 → 1 · 실제 결제 0원 · 재고 숫자 불변',
+   kit.data()?.salesCount===1&&kit.data()?.stock===0
+   &&order.data()?.charged===0&&order.data()?.inventoryPolicy==='availability-only');
+  const replay=capture();await checkoutKit(user,input,replay,{diagnostic:true});
   kit=await kitRef.get();
-  check(steps,'동일 주문 중복 결제·재고 차감 차단',
-   replay.statusCode===200&&kit.data()?.stock===1);
+  check(steps,'동일 주문 중복 등록 차단',replay.statusCode===200&&kit.data()?.salesCount===1);
   const cancel=capture();
   await changeKit(user,{action:'cancel',id:checkoutKey,version:first.body.order.version},cancel);
   kit=await kitRef.get();
   const sale=await ref(collections.sales,'fc_kit_'+checkoutKey+'_0').get();
-  check(steps,'주문 취소 · 재고 1 → 2 복원 · 판매원장 취소',
-   cancel.statusCode===200&&kit.data()?.stock===2&&sale.data()?.status==='cancelled');
+  check(steps,'주문 취소 · 판매량 1 → 0 · 판매원장 취소',
+   cancel.statusCode===200&&kit.data()?.salesCount===0&&kit.data()?.stock===0
+   &&sale.data()?.status==='cancelled');
   let rejected=false;
   try{await changeKit(user,{action:'cancel',id:checkoutKey,version:first.body.order.version},capture());}
   catch(e){rejected=e.status===409;}
-  check(steps,'동일 취소 반복 시 이중 복원 방지',rejected&&(await kitRef.get()).data()?.stock===2);
-  // Production transaction contention, limited to a disposable unpublished fixture.
-  await kitRef.update({stock:1,version:4,updatedAt:now()});
-  const raceKey1=randomUUID(),raceKey2=randomUUID();
-  for(const key of [raceKey1,raceKey2]){
+  check(steps,'중복 주문 취소 차단',rejected&&(await kitRef.get()).data()?.salesCount===0);
+  await kitRef.update({soldOut:true});
+  let paused=false;
+  try{await checkoutKit(user,{...input,checkoutKey:randomUUID()},capture(),{diagnostic:true});}
+  catch(e){paused=e.status===409;}
+  check(steps,'관리자 품절 설정 시 신규 주문 차단',paused);
+  await kitRef.update({soldOut:false});
+  const keys=[randomUUID(),randomUUID()];
+  for(const key of keys){
    scope.doc(ref(collections.orders,'kit_'+key));
    scope.doc(ref(collections.private,'kit_'+key));
    scope.doc(ref(collections.sales,'fc_kit_'+key+'_0'));
   }
-  const raceItems=[{...line,version:4}],raceShipping=testShipping();
-  const results=await Promise.allSettled([raceKey1,raceKey2].map(checkoutKey=>
-   checkoutKit(user,{checkoutKey,items:raceItems,shipping:raceShipping,accepted:true},capture(),{diagnostic:true})));
-  const wins=results.filter(r=>r.status==='fulfilled').length;
-  const refusals=results.filter(r=>r.status==='rejected'&&r.reason?.status===409).length;
-  check(steps,'동시 주문 경합: 1건 성공 · 1건 품절 차단',
-   wins===1&&refusals===1&&(await kitRef.get()).data()?.stock===0);
+  const results=await Promise.allSettled(keys.map(checkoutKey=>
+   checkoutKit(user,{checkoutKey,items:[line],shipping:testShipping(),accepted:true},capture(),{diagnostic:true})));
+  check(steps,'동시 주문 두 건 모두 등록 · 누적 판매량 2',
+   results.every(x=>x.status==='fulfilled')&&(await kitRef.get()).data()?.salesCount===2);
  }
  async function patternRun(user,scope,steps,request){
   const runId=hex(),sellerUid='diag_seller_'+runId;
