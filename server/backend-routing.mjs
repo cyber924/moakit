@@ -25,6 +25,7 @@ export function backendRoute(request) {
   // production cutover flag are configured, legacy Work routes stay intact.
   if (['/api/shop','/api/kits/orders','/api/kits'].includes(url.pathname) && request.headers.get('x-moakit-firebase-commerce') === '1') return { local: true };
   if (url.pathname === '/api/admin-system-health' && request.method === 'POST') return { local: true };
+  if (url.pathname === '/api/community-firebase') return { local: true };
   if (url.pathname === '/api/tester/publish' && request.method === 'POST' && request.headers.get('x-moakit-tester-local') === '1') return { local: true };
   if (url.pathname === '/api/commerce-status' || url.pathname === '/api/commerce-health' || url.pathname === '/api/commerce-finance' || url.pathname === '/api/commerce-diagnostics' || url.pathname === '/api/commerce-cutover') return { local: true };
   if (url.pathname === '/api/seller/extract' || url.pathname === '/api/image-copy' || url.pathname === '/api/image-assets' || url.pathname === '/api/kit-sample' || url.pathname === '/api/kit-sample-copy' || url.pathname === '/api/site-asset' || url.pathname === '/api/site-asset-copy') return { local: true };
