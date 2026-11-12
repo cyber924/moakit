@@ -11,8 +11,11 @@ export async function firebaseCommerceStatus(){
  try{
   const response=await fetch(ENDPOINT+'?resource=status',{cache:'no-store',signal:AbortSignal.timeout(5500)});
   const value=await response.json().catch(()=>({}));
-  return {active:response.ok&&value.active===true,mode:response.ok&&value.active===true?'firebase':'legacy'};
- }catch{return {active:false,mode:'legacy'};}
+  if(!response.ok||typeof value.active!=='boolean'||
+     value.mode!==(value.active?'firebase':'legacy'))
+    return {active:false,mode:'unavailable'};
+  return {active:value.active,mode:value.mode};
+ }catch{return {active:false,mode:'unavailable'};}
 }
 export async function proxyFirebaseCommerce(request:Request,resource:Resource,{requireActivation=true,staging=false}:{requireActivation?:boolean,staging?:boolean}={}){
  const incoming=new URL(request.url),origin=request.headers.get('origin');
