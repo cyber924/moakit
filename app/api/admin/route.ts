@@ -1,5 +1,5 @@
 import {adminApi} from '../../../server/admin.mjs';
-import {isFirebaseAdminReadAction} from '../../../public/admin-local-actions.mjs';
+import {isFirebaseAdminLocalAction} from '../../../public/admin-local-actions.mjs';
 
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -19,7 +19,7 @@ export async function POST(request:Request){
   if(raw.length>48000)return Response.json({error:'요청이 너무 큽니다.'},{status:413});
   action=JSON.parse(raw)?.action;
  }catch{return Response.json({error:'잘못된 요청입니다.'},{status:400});}
- if(!isFirebaseAdminReadAction(action))
-  return Response.json({error:'현재 관리 기능은 기존 서버에서 처리합니다.'},{status:400});
+ if(!isFirebaseAdminLocalAction(action))
+  return Response.json({error:'Firebase로 이전되지 않은 관리 기능입니다.'},{status:400});
  return adminApi(request);
 }
