@@ -6,10 +6,11 @@ const ROOT='https://firestore.googleapis.com/v1/projects/'+PROJECT+'/databases/(
 const validId=v=>/^[A-Za-z0-9_-]{1,100}$/.test(v);
 function decodeKit(doc){
  const k=decodeDocument(doc);
- if(!validId(k.id)||k.status!=='published'||!Number.isSafeInteger(k.stock)||!Number.isSafeInteger(k.price))return null;
+ if(!validId(k.id)||k.status!=='published'||!Number.isSafeInteger(k.price))return null;
  let data;try{data=JSON.parse(k.dataJson||'{}');}catch{return null;}
  if(!data||typeof data!=='object'||Array.isArray(data)||Number(data.price)!==k.price)return null;
- return {id:k.id,status:k.status,stock:k.stock,version:k.version,createdAt:k.createdAt,updatedAt:k.updatedAt,
+ return {id:k.id,status:k.status,stock:k.stock,soldOut:typeof k.soldOut==='boolean'?k.soldOut:k.stock===0,
+  salesCount:Number.isSafeInteger(k.salesCount)?k.salesCount:0,version:k.version,createdAt:k.createdAt,updatedAt:k.updatedAt,
   data:discoveryData(data)};
 }
 async function publicGet(url,method='GET',body){
