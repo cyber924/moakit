@@ -4,6 +4,7 @@ import {
  importLegacyPatternOrders,importOrdersFromVerifiedSales,listLegacyPurchasePage
 } from './finance-firestore.mjs?v=orders-migration-1';
 import {tallyOrderMatches} from './order-migration-core.mjs';
+import {auditLegacyOrderCoverage} from './legacy-order-audit.mjs';
 import {commerceMode} from './commerce-switch.mjs';
 import {reconcileTestFinance} from './finance-reconciliation-core.mjs';
 
@@ -16,7 +17,7 @@ const date=s=>s?new Date(s).toLocaleDateString('ko-KR'):'—';
 export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={}){
  const adminUid=window.MoaAccount?.user?.uid;
  const live=()=>target.isConnected&&window.MoaAccount?.user?.uid===adminUid;
- let busy=false,orders=[],sales=[],settlements=[],lastImport=null;
+ let busy=false,orders=[],sales=[],settlements=[],lastImport=null,lastAudit=null;
  const note=s=>{const slot=target.querySelector('[data-firebase-note]');if(slot)slot.textContent=s};
  async function load(){
   if(!live())return;
@@ -47,6 +48,7 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
     ['테스트 정산서',settlements.length+'건'],['테스트 판매 기록액',W(sales.reduce((n,s)=>n+Number(s.amount||0),0))]
    ].map(([a,b])=>'<div class="admin-stat"><span>'+E(a)+'</span><strong>'+E(b)+'</strong></div>').join('')+'</div>'+
    '<div class="image-copy-actions"><button type="button" class="admin-button primary" data-fin-db-action="orders-all">기존 주문 전체 Firebase 이전</button>'+
+   '<button type="button" class="admin-button" data-fin-db-action="audit">Work 구매 이력 누락 점검 (읽기 전용)</button>'+
    '<button type="button" class="admin-button" data-fin-db-action="refresh">Firebase 새로고침</button>'+
    '<button type="button" class="admin-button" data-fin-db-action="sales">기존 D1 판매 내역 가져오기 (현재 조회 기간)</button>'+
    '<button type="button" class="admin-button" data-fin-db-action="kits">기존 KIT 주문 가져오기</button>'+
@@ -56,6 +58,8 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
       ' · D1 KIT 판매는 상품별 판매 행이므로 주문은 원본 KIT 주문번호로 중복 없이 이전합니다.</p>'+
    (lastImport?'<p class="admin-notice">마지막 주문 이전: 신규 '+lastImport.created+'건 · 기존 '+lastImport.skipped+'건 · 실패 '+lastImport.failed+'건 · 이전 후 전체 '+lastImport.after+'건'+
       (lastImport.errors?.length?' · 점검: '+E(lastImport.errors.join(' / ')):'')+'</p>':'')+
+   (lastAudit?'<p class="admin-notice">Work 이력 대조: 원본 '+lastAudit.expected+'건 / 연결 '+lastAudit.matched+'건 / 누락 '+lastAudit.missing.length+'건 / 불일치 '+lastAudit.conflicts.length+'건 / 확인 불가 '+lastAudit.issues.length+'건. '+
+     (lastAudit.complete?'주문 문서 기준 일치 · PDF 권한/배송 원본은 별도 검증 필요':'Work 서버 연결을 유지하세요.')+'</p>':'')+
    '<p role="status" class="admin-notice" data-firebase-note>기존 기록을 가져와도 원본 D1 데이터는 삭제되지 않습니다.</p>'+
    '<p class="admin-notice">정수 70:30 계산으로 과거 테스트 판매 '+reconciliation.roundingCorrections+'건, 총 '+W(reconciliation.roundingCorrectionWon)+'의 표시 오차를 보정했습니다. 원본 Firebase 문서는 변경하지 않았습니다.'+
    (reconciliation.blocked.length?' · 원본 정산서 매칭 전까지 '+reconciliation.blocked.length+'건은 재정산 보류합니다.':' · 기존 D1 정산서와 연결된 거래는 미정산에서 제외됩니다.')+'</p>'+
@@ -119,6 +123,46 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
    }
    return 'Firebase 테스트 정산서 생성 완료 (송금 없음)';
   }));
+  async function auditWorkOrders(){
+   const user=window.MoaAccount?.user;
+   if(!user)throw Error('관리자 로그인이 필요합니다.');
+   const patternPurchases=[],kitOrders=[];
+   let next='',seen=new Set();
+   for(let page=0;page<100;page++){
+    if(!live())throw Error('관리자 로그인 상태가 변경됐습니다.');
+    note('Work 이전 도안 이력 대조 · '+page+'페이지');
+    const result=await listLegacyPurchasePage(next);
+    patternPurchases.push(...result.entries);
+    if(result.stats?.invalid)throw Error('해석할 수 없는 기존 도안 구매 '+result.stats.invalid+'건 · 확인 후 다시 진행해주세요.');
+    if(!result.nextPageToken)break;
+    if(seen.has(result.nextPageToken))throw Error('구매 페이지가 반복됩니다.');
+    seen.add(result.nextPageToken);next=result.nextPageToken;
+    if(page===99)throw Error('도안 구매 이력 100페이지 초과');
+   }
+   let cursor='';seen=new Set();
+   for(let page=0;page<100;page++){
+    if(!live())throw Error('관리자 로그인 상태가 변경됐습니다.');
+    note('Work 기존 KIT 주문 대조 · '+page+'페이지');
+    const url='/api/kits/orders?'+new URLSearchParams({admin:'1',...(cursor?{cursor}:{})});
+    const response=await fetch(url,{headers:{
+     Authorization:'Bearer '+await user.getIdToken(),
+     'X-MOAKIT-LEGACY-VIEW':'1'
+    },signal:AbortSignal.timeout(35000)});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error('기존 Work KIT 주문 조회 실패 ('+response.status+')');
+    kitOrders.push(...(data.orders||[]));
+    if(!data.nextCursor)break;
+    if(seen.has(data.nextCursor))throw Error('KIT 주문 페이지가 반복됩니다.');
+    seen.add(data.nextCursor);cursor=data.nextCursor;
+    if(page===99)throw Error('KIT 주문 100페이지 초과');
+   }
+   const records=await testOrders({role:'admin'});
+   const result=auditLegacyOrderCoverage({patternPurchases,kitOrders},records);
+   lastAudit=result;
+   return 'Work 구매 원본 '+result.expected+'건 · Firebase 일치 '+result.matched+'건 · 누락 '+
+    result.missing.length+'건 · 불일치 '+result.conflicts.length+'건 · 검증 실패 '+result.issues.length+
+    '건. PDF 구매 권한·기존 배송 정보는 별도 검증해야 하므로 Work 서버는 유지합니다.';
+  }
   async function migrateAllOrders(){
    const startCount=orders.length;
    const summary={created:0,skipped:0,failed:0,errors:[],before:startCount,after:startCount};
@@ -148,7 +192,7 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
      if(!live())throw Error('로그인 세션이 변경됐습니다.');
      note('2/3 · 기존 KIT 주문을 확인하고 있습니다 ('+(pages*20)+'건 이상)');
      const url='/api/kits/orders?'+new URLSearchParams({admin:'1',...(cursor?{cursor}:{})});
-     const response=await fetch(url,{headers:{Authorization:'Bearer '+await user.getIdToken()},
+     const response=await fetch(url,{headers:{Authorization:'Bearer '+await user.getIdToken(),'X-MOAKIT-LEGACY-VIEW':'1'},
        signal:AbortSignal.timeout(35000)});
      const data=await response.json().catch(()=>({}));
      if(!response.ok)throw Error('KIT 주문 조회 '+response.status+': '+String(data.error||'').slice(0,90));
@@ -176,6 +220,7 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
   target.querySelectorAll('[data-fin-db-action]').forEach(b=>b.onclick=()=>run(async()=>{
    const action=b.dataset.finDbAction;
    if(action==='refresh')return '자료를 다시 불러왔습니다.';
+   if(action==='audit')return auditWorkOrders();
    if(action==='orders-all')return migrateAllOrders();
    if(action==='sales'){
     const d=await legacyApi('exportSales',{...(criteria?criteria():{}),mode:'test',page:1});
@@ -193,7 +238,7 @@ export async function mountFirebaseFinanceAdmin(target, {legacyApi,criteria}={})
     for(let n=0;n<100;n++){
      note('이전 중 · KIT 주문 '+scanned+'건 확인');
      const url='/api/kits/orders?'+new URLSearchParams({admin:'1',...(cursor?{cursor}:{})});
-     const r=await fetch(url,{headers:{Authorization:'Bearer '+await user.getIdToken()},signal:AbortSignal.timeout(35000)});
+     const r=await fetch(url,{headers:{Authorization:'Bearer '+await user.getIdToken(),'X-MOAKIT-LEGACY-VIEW':'1'},signal:AbortSignal.timeout(35000)});
      const data=await r.json().catch(()=>({}));
      if(!r.ok)throw Error('KIT 이전 조회 ('+r.status+'): '+(data.error||''));
      const batch=data.orders||[];
