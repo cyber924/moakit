@@ -138,7 +138,7 @@ module.exports=function createTestRoom({db,bucket,session,adminSession,now,fail,
     return displayed({...p,newActivity:String(p.lastActivityAt||p.updatedAt)>String(doc.data()?.readAt||'')},a);
    })):[];
    let snapshot={};try{snapshot=JSON.parse(a.call.content||'{}').snapshot||{}}catch{}
-   return json(res,{room:{id:a.id,title:snapshot.title||'비공개 테스트룸',
+   return json(res,{room:{id:a.id,...(a.manager?{sellerUid:a.call.sellerUid}:{}),title:snapshot.title||'비공개 테스트룸',
     authorName:snapshot.sellerName||'작가',image:snapshot.images?.[0]||'',
     testStart:a.call.testStart,testEnd:a.call.testEnd,notice:a.call.notice||'',
     role:a.role,applicationStatus:a.application?.status||'',canRead:true,
