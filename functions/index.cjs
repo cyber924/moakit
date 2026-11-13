@@ -75,7 +75,7 @@ async function statusRoute(req,res){
  const ready=migration.data()||{};
  json(res,{active:enabled,mode:enabled?'firebase':'legacy',engine:'firebase-functions-v2',
   services:{records:true,testerFile:true,testerPublish:true,
-   catalog:ready.catalogReady===true,
+   catalog:ready.catalogReady===true,migration:true,
    testRoom:ready.testRoomReady===true,community:ready.communityReady===true}});
 
 }
@@ -591,6 +591,7 @@ const testerFileRoute=require('./tester-file-firebase.cjs')({db,bucket,now,sessi
 const testerPublishRoute=require('./tester-publish-firebase.cjs')({db,now,session,adminSession,
  fail,json,prepareFile:testerFileRoute});
 const testerRoomRoute=require('./test-room-firebase.cjs')({db,bucket,now,session,adminSession,fail,json});
+const workMigrationRoute=require('./work-migration.cjs')({db,now,adminSession,fail,json});
 const runDiagnostics=require('./commerce-diagnostics.cjs')({
  db,bucket,ref,collections,now,adminSession,active,
  checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
@@ -611,6 +612,7 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   if(resource==='testerFile')return await testerFileRoute(req,res);
   if(resource==='testerPublish')return await testerPublishRoute(req,res);
   if(resource==='testRoom')return await testerRoomRoute(req,res);
+  if(resource==='workMigration')return await workMigrationRoute(req,res);
   if(resource==='community')return await communityRoute(req,res);
   // Staged requests are allowed only for authenticated administrators.
   if(!await active()){
