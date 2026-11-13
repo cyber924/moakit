@@ -1,7 +1,7 @@
 'use strict';
 const {randomUUID}=require('node:crypto');
 const {Buffer}=require('node:buffer');
-const {cleanTicket,cleanNotice}=Object.create(null); // Validation is self-contained: Cloud Functions uses CommonJS.
+// The Firebase Cloud Function validates user input before each Firestore write.
 const ID=/^[A-Za-z0-9_-]{1,180}$/;
 const KINDS=new Set(['pattern','order','tester','report','other']);
 const STATUSES=new Set(['received','reviewing','answered','closed']);
