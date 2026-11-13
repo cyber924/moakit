@@ -71,7 +71,12 @@ function json(res,result,status=200){
 async function statusRoute(req,res){
  if(req.method!=='GET')throw fail('GET 요청만 허용합니다.',405);
  const enabled=await active();
- json(res,{active:enabled,mode:enabled?'firebase':'legacy',engine:'firebase-functions-v2'});
+ const migration=await db.doc('moakitSettings/workIndependence').get();
+ const ready=migration.data()||{};
+ json(res,{active:enabled,mode:enabled?'firebase':'legacy',engine:'firebase-functions-v2',
+  services:{records:true,testerFile:true,testerPublish:true,
+   testRoom:ready.testRoomReady===true,community:ready.communityReady===true}});
+
 }
 async function healthRoute(req,res){
  await adminSession(req);
