@@ -33,7 +33,8 @@ export function backendRoute(request) {
     '/api/tester/file','/api/tester/publish']);
   if(independent.has(url.pathname)&&request.headers.get('x-moakit-firebase-feature')==='1')
     return {local:true};
-  if (url.pathname === '/api/pattern-catalog' || url.pathname === '/api/pattern-admin') return { local: true };
+  if ((url.pathname === '/api/pattern-catalog' || url.pathname === '/api/pattern-admin')
+    && request.headers.get('x-moakit-firebase-feature') === '1') return { local: true };
 
   if (url.pathname === '/api/commerce-status' || url.pathname === '/api/commerce-health' || url.pathname === '/api/commerce-finance' || url.pathname === '/api/commerce-diagnostics' || url.pathname === '/api/commerce-cutover') return { local: true };
   if (url.pathname === '/api/seller/extract' || url.pathname === '/api/image-copy' || url.pathname === '/api/image-assets' || url.pathname === '/api/kit-sample' || url.pathname === '/api/kit-sample-copy' || url.pathname === '/api/site-asset' || url.pathname === '/api/site-asset-copy') return { local: true };
