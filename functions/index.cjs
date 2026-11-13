@@ -74,7 +74,8 @@ async function statusRoute(req,res){
  const migration=await db.doc('moakitSettings/workIndependence').get();
  const ready=migration.data()||{};
  json(res,{active:enabled,mode:enabled?'firebase':'legacy',engine:'firebase-functions-v2',
-  services:{records:true,testerFile:true,testerPublish:true,
+  services:{records:true,testerFile:ready.testerFileReady===true,
+   testerPublish:ready.testerPublishReady===true,
    catalog:ready.catalogReady===true,migration:true,
    testRoom:ready.testRoomReady===true,community:ready.communityReady===true}});
 
