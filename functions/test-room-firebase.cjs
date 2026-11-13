@@ -111,7 +111,7 @@ module.exports=function createTestRoom({db,bucket,session,adminSession,now,fail,
     if(page.size>=201)throw fail('댓글이 200개 이상입니다. 분할 조회가 필요합니다.',503);
     const messages=page.docs.map(c=>c.data()).filter(c=>!c.deleted)
       .sort((x,y)=>String(x.createdAt).localeCompare(String(y.createdAt)));
-    await a.ref.collection('roomReads').doc(a.user.uid+'_'+postId).set({readAt:now()});
+    await a.ref.collection('roomReads').doc(a.user.uid+'_'+postId).set({uid:a.user.uid,postId,readAt:now()});
     return json(res,{comments:messages.map(c=>({id:c.id,body:c.body,authorName:c.authorName,
      createdAt:c.createdAt,canDelete:a.manager||c.authorUid===a.user.uid}))});
    }
@@ -120,7 +120,7 @@ module.exports=function createTestRoom({db,bucket,session,adminSession,now,fail,
    if(!allowed.includes(view)||cursor&&!ID.test(cursor))throw fail('게시글 조회 조건을 확인해주세요.',400);
    const [postPage,files,roster]=await Promise.all([
     posts.orderBy('id','desc').limit(401).get(),
-    resources.orderBy('createdAt','desc').limit(201).get(),members(a)
+    resources.orderBy('created_at','desc').limit(201).get(),members(a)
    ]);
    if(postPage.size>=401||files.size>=201)throw fail('테스트룸 자료가 많아 추가 페이지 구현이 필요합니다.',503);
    let rows=postPage.docs.map(x=>x.data()).filter(p=>!p.deleted&&(!cursor||p.id<cursor));
@@ -217,8 +217,12 @@ module.exports=function createTestRoom({db,bucket,session,adminSession,now,fail,
   }
   if(action==='resolve'){
    if(!a.manager)throw fail('답변 상태는 작가·관리자만 변경할 수 있습니다.',403);
-   await postRef.update({resolved:body.resolved===true,lastActivityAt:stamp,
-    version:db.constructor.FieldValue?.increment?.(1)||1});
+   await db.runTransaction(async tx=>{
+    const old=await tx.get(postRef);
+    if(!old.exists||old.data().deleted)throw notFound('게시글');
+    tx.update(postRef,{resolved:body.resolved===true,lastActivityAt:stamp,
+     version:(old.data().version||1)+1});
+   });
    return json(res,{saved:true});
   }
   if(action==='deletePost'){
