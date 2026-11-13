@@ -1,5 +1,6 @@
 import {compressPatternImage} from './pattern-image-compress.js';
 import {savePatternToFirebase} from './firebase-pattern-save.mjs';
+import {firebaseServiceReady} from './work-independence-mode.mjs';
 import {publicRecord,listingId,mergePublishedInformation} from './market-core.mjs';
 import {encodeFields,decodeDocument} from './member-core.mjs';
 import {validateFile,toRecord,fromRecord} from './seller-core.mjs';
@@ -32,7 +33,40 @@ export async function getWork(F,id){
  if(uid(F)!==mine)throw Error('로그인 계정이 변경됐어요.');
  return d;
 }
-export async function saveDraft(F,d,options={}){const updatedAt=await savePatternToFirebase(F,d);if(d.status==='published')window.dispatchEvent(new Event('moa:published'));return updatedAt;}
+export async function saveDraft(F,d,{record=true,reason=''}={}){
+ const mine=uid(F);
+ if(d.sellerUid!==mine)throw Error('본인 작품만 저장할 수 있습니다.');
+ // Keep the old registrar until Firebase has deployed its append-only ledger.
+ if(!await firebaseServiceReady('records')){
+  const r=await fetch('/api/work-records',{method:'POST',headers:{
+   Authorization:'Bearer '+await token(F),'Content-Type':'application/json'
+  },body:JSON.stringify({action:'save',draft:d,record,reason}),signal:AbortSignal.timeout(120000)});
+  const v=await r.json().catch(()=>({}));
+  if(!r.ok)throw Error(v.error||'도안 등록기록·저장에 실패했습니다.');
+  if(uid(F)!==mine)throw Error('로그인 계정이 변경됐습니다.');
+  if(d.status==='published')window.dispatchEvent(new Event('moa:published'));
+  return v.updatedAt;
+ }
+ const updatedAt=await savePatternToFirebase(F,d);
+ // A separate append-only server receipt; never pretend it was created.
+ // Source itself remains saved even if the receipt request needs retry.
+ if(record){
+  try{
+   const r=await fetch('/api/work-records',{method:'POST',headers:{
+    Authorization:'Bearer '+await token(F),'Content-Type':'application/json',
+    'X-MOAKIT-FIREBASE-FEATURE':'1'
+   },body:JSON.stringify({action:'capture',sellerUid:mine,workId:d.id,reason}),
+   signal:AbortSignal.timeout(30000)});
+   if(!r.ok){const body=await r.json().catch(()=>({}));
+    throw Error(body.error||'Firebase 등록기록 추가 실패');}
+  }catch(error){
+   console.warn('FIREBASE_WORK_RECORD_PENDING',error.message);
+   window.dispatchEvent(new CustomEvent('moa:record-pending',{detail:{workId:d.id}}));
+  }
+ }
+ if(d.status==='published')window.dispatchEvent(new Event('moa:published'));
+ return updatedAt;
+}
 export async function deleteDraft(F,id){await req(F,`moakitUsers/${uid(F)}/works/${id}`,{method:'DELETE'});}
 export const publicImage=path=>String(path||'').startsWith('/assets/')?path:`https://firebasestorage.googleapis.com/v0/b/${BUCKET}/o/${encodeURIComponent(path)}?alt=media`;
 export async function verifyStoredFile(F,file,{signal}={}){const mine=uid(F);if(!file?.path?.startsWith(`moakit/private/${mine}/`))throw Error('본인이 올린 PDF만 확인할 수 있어요.');try{const auth=await token(F,signal);const response=await fetch(`https://firebasestorage.googleapis.com/v0/b/${BUCKET}/o/${encodeURIComponent(file.path)}`,{headers:{Authorization:'Firebase '+auth},signal:requestSignal(signal,20000)});const metadata=await response.json().catch(()=>({}));if(!response.ok)throw Error(response.status===404?'저장 경로에서 PDF를 찾지 못했어요. 파일을 다시 올려주세요.':response.status===403?'PDF 저장 확인 권한이 없어요. 로그인·Storage 규칙을 확인해주세요.':'Storage 저장 확인에 실패했어요. 다시 확인해주세요.');if(metadata.name!==file.path||Number(metadata.size)!==file.size||metadata.contentType!=='application/pdf')throw Error('저장된 파일 정보가 선택한 PDF와 달라요. 다시 올려주세요.');if(uid(F)!==mine)throw Error('로그인 계정이 변경됐어요.');return {...file,verifiedAt:new Date().toISOString(),generation:String(metadata.generation||'')};}catch(error){if(error.name==='TimeoutError')throw Error('저장 확인 시간이 초과됐어요. 파일은 업로드됐을 수 있으니 ‘저장 다시 확인’을 눌러주세요.');throw error;}}
