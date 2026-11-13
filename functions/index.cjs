@@ -592,7 +592,7 @@ const testerFileRoute=require('./tester-file-firebase.cjs')({db,bucket,now,sessi
 const testerPublishRoute=require('./tester-publish-firebase.cjs')({db,now,session,adminSession,
  fail,json,prepareFile:testerFileRoute});
 const testerRoomRoute=require('./test-room-firebase.cjs')({db,bucket,now,session,adminSession,fail,json});
-const workMigrationRoute=require('./work-migration.cjs')({db,now,adminSession,fail,json});
+const workMigrationRoute=require('./work-migration.cjs')({db,now,adminSession,fail,json,testerFile:testerFileRoute});
 const runDiagnostics=require('./commerce-diagnostics.cjs')({
  db,bucket,ref,collections,now,adminSession,active,
  checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
