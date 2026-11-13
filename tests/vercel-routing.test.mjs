@@ -32,11 +32,12 @@ test('unknown endpoints and unsafe methods cannot be used as open proxies', () =
 test('Work remains only for explicitly unconverted routes, while Firebase-migrated endpoints are local', () => {
   assert.equal(backendRoute(new Request(host + '/api/seller/extract')).local,true);
   assert.equal(SHARED_API_PATHS.size,24);
-  const standalone=new Set(['/api/pattern-catalog','/api/pattern-admin']);
   for (const path of SHARED_API_PATHS){
    const response=backendRoute(new Request(host + path));
-   if(standalone.has(path))assert.equal(response.local,true,path);
-   else assert.equal(new URL(response.target).origin,BACKEND_ORIGIN,path);
+   assert.equal(new URL(response.target).origin,BACKEND_ORIGIN,path);
+  }
+  for(const path of ['/api/pattern-catalog','/api/pattern-admin']){
+   assert.equal(backendRoute(new Request(host+path,{headers:{'x-moakit-firebase-feature':'1'}})).local,true,path);
   }
   for(const path of ['/api/community','/api/test-room','/api/work-records','/api/tester/file','/api/tester/publish']){
    assert.equal(backendRoute(new Request(host+path,{headers:{'x-moakit-firebase-feature':'1'}})).local,true,path);
