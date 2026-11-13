@@ -83,5 +83,12 @@ module.exports=function createTesterFile({db,bucket,session,adminSession,now,fai
    stream.on('end',resolve);stream.pipe(res);
   });
  }
+ testerFileRoute.ensure=ensure;
+ testerFileRoute.refreshExpiry=async(callId,call)=>{
+  const record=await ensure(callId,call);
+  const expiresAt=new Date(Date.parse(call.testEnd)+7*86400000).toISOString();
+  await db.doc('moakitTesterCalls/'+callId+'/private/file').update({expiresAt});
+  return {...record,expiresAt};
+ };
  return testerFileRoute;
 };
