@@ -29,7 +29,7 @@ export function backendRoute(request) {
     || url.pathname === '/api/work-independence-status' || url.pathname === '/api/work-migration') return { local: true };
   // This header is only emitted after an authenticated server readiness check.
   // Until historical migration is complete, existing Work reads stay intact.
-  const independent=new Set(['/api/community','/api/test-room','/api/work-records',
+  const independent=new Set(['/api/notifications','/api/support','/api/community','/api/test-room','/api/work-records',
     '/api/tester/file','/api/tester/publish']);
   if(independent.has(url.pathname)&&request.headers.get('x-moakit-firebase-feature')==='1')
     return {local:true};
