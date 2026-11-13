@@ -3,10 +3,48 @@ import {ROOM_KINDS} from './test-room-core.mjs';
 import {publicImage} from './seller-client.js';
 import {compressBanner} from './promotions-client.js';
 import * as API from './tester-client.js';
+import {firebaseServiceReady} from './work-independence-mode.mjs';
 const E=s=>window.MoaUI.escapeHtml(String(s??'')),root=document.createElement('main');root.id='test-room-root';root.className='test-room-page';root.hidden=true;document.querySelector('footer').before(root);
 let callId='',data=null,tab='talk',filter='all',posts=[],cursor='',busy=false,epoch=0;
 const auth=()=>({user:window.MoaAccount?.user});
-async function request(params={},body=null){const user=window.MoaAccount?.user,uid=user?.uid;if(!user)throw Error('로그인 후 테스트룸을 이용해주세요.');const form=body instanceof FormData,r=await fetch('/api/test-room?'+new URLSearchParams({callId,...params}),{method:body?'POST':'GET',headers:{Authorization:'Bearer '+await user.getIdToken(),...(!form&&body?{'Content-Type':'application/json'}:{})},...(body?{body:form?body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(form?90000:45000)});if(window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐습니다.');if(params.file){if(!r.ok)throw Error((await r.json()).error);return r.blob();}const d=await r.json();if(!r.ok)throw Error(d.error);return d;}
+async function request(params={},body=null){
+ const user=window.MoaAccount?.user,uid=user?.uid;
+ if(!user)throw Error('로그인 후 테스트룸을 이용해주세요.');
+ const ready=await firebaseServiceReady('testRoom'),fileUpload=body instanceof FormData;
+ if(ready&&fileUpload){
+  const file=body.get('file'),sellerUid=data?.room?.sellerUid;
+  if(!sellerUid||typeof sellerUid!=='string'||!file||typeof file.arrayBuffer!=='function')
+   throw Error('작가와 수정본 PDF를 확인해주세요.');
+  if(file.size>10*1024*1024||!file.size||file.type!=='application/pdf')
+   throw Error('10MB 이하 PDF를 선택해주세요.');
+  const header=new TextDecoder().decode(await file.slice(0,5).arrayBuffer());
+  if(header!=='%PDF-')throw Error('실제 PDF 파일만 업로드할 수 있습니다.');
+  const path='moakit/private/'+sellerUid+'/'+callId+'/'+crypto.randomUUID()+'.pdf';
+  const storage=await fetch('https://firebasestorage.googleapis.com/v0/b/studio-1613487721-b043c.firebasestorage.app/o?uploadType=media&name='+encodeURIComponent(path),{
+   method:'POST',headers:{Authorization:'Firebase '+await user.getIdToken(),
+    'Content-Type':'application/pdf'},body:file,signal:AbortSignal.timeout(90000)});
+  if(!storage.ok)throw Error('Firebase Storage에 수정 PDF를 저장할 수 없습니다. 작가·관리자 권한을 확인해주세요.');
+  body={action:'resource',storagePath:path,title:String(body.get('title')||''),
+   changes:String(body.get('changes')||'')};
+ }
+ const isForm=body instanceof FormData;
+ const r=await fetch('/api/test-room?'+new URLSearchParams({callId,...params}),{
+  method:body?'POST':'GET',
+  headers:{Authorization:'Bearer '+await user.getIdToken(),
+   ...(ready?{'X-MOAKIT-FIREBASE-FEATURE':'1'}:{}),
+   ...(!isForm&&body?{'Content-Type':'application/json'}:{})},
+  ...(body?{body:isForm?body:JSON.stringify(body)}:{}),
+  signal:AbortSignal.timeout(isForm?90000:45000)
+ });
+ if(window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐습니다.');
+ if(params.file){
+  if(!r.ok){const error=await r.json().catch(()=>({}));throw Error(error.error||'PDF를 받을 수 없습니다.');}
+  return r.blob();
+ }
+ const response=await r.json().catch(()=>({}));
+ if(!r.ok)throw Error(response.error||'테스트룸 요청 실패');
+ return response;
+}
 function state(text){const out=root.querySelector('[data-room-state]');if(out)out.textContent=text;}
 async function run(fn){if(busy)return;busy=true;try{await fn();}catch(e){state(e.message);}finally{busy=false;}}
 async function load(more=false){const mine=++epoch;try{const d=await request({view:filter,...(more&&cursor?{cursor}:{})});if(root.hidden||mine!==epoch)return;data=d;posts=more?[...posts,...d.posts]:d.posts;cursor=d.nextCursor;paint();}catch(e){if(root.hidden||mine!==epoch)return;root.innerHTML=`<div class="room-access-error"><small>비공개 테스트룸</small><h1>테스트룸 입장 안내</h1><p role="alert">${E(e.message)}</p>${!window.MoaAccount?.user?'<a class="seller-button primary" href="#login">로그인</a>':''}<a class="seller-button" href="#my/tester">나의 테스터 활동</a><a class="seller-button" href="#tester-calls">테스터콜 둘러보기</a></div>`;}}

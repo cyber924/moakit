@@ -25,6 +25,17 @@ export function backendRoute(request) {
   // production cutover flag are configured, legacy Work routes stay intact.
   if (['/api/shop','/api/kits/orders','/api/kits'].includes(url.pathname) && request.headers.get('x-moakit-firebase-commerce') === '1') return { local: true };
   if (url.pathname === '/api/admin-system-health' && request.method === 'POST') return { local: true };
+  if (url.pathname === '/api/community-firebase' || url.pathname === '/api/test-room-firebase' || url.pathname === '/api/work-records-firebase'
+    || url.pathname === '/api/work-independence-status' || url.pathname === '/api/work-migration') return { local: true };
+  // This header is only emitted after an authenticated server readiness check.
+  // Until historical migration is complete, existing Work reads stay intact.
+  const independent=new Set(['/api/community','/api/test-room','/api/work-records',
+    '/api/tester/file','/api/tester/publish']);
+  if(independent.has(url.pathname)&&request.headers.get('x-moakit-firebase-feature')==='1')
+    return {local:true};
+  if ((url.pathname === '/api/pattern-catalog' || url.pathname === '/api/pattern-admin')
+    && request.headers.get('x-moakit-firebase-feature') === '1') return { local: true };
+
   if (url.pathname === '/api/commerce-status' || url.pathname === '/api/commerce-health' || url.pathname === '/api/commerce-finance' || url.pathname === '/api/commerce-diagnostics' || url.pathname === '/api/commerce-cutover') return { local: true };
   if (url.pathname === '/api/seller/extract' || url.pathname === '/api/image-copy' || url.pathname === '/api/image-assets' || url.pathname === '/api/kit-sample' || url.pathname === '/api/kit-sample-copy' || url.pathname === '/api/site-asset' || url.pathname === '/api/site-asset-copy') return { local: true };
   if (url.pathname === '/api/promotions' && request.method === 'GET' && url.searchParams.has('image')) return { local: true };

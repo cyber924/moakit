@@ -103,6 +103,135 @@ async function run(){
  await db.doc('moakitKits/'+kit).update({soldOut:true});
  const unavailable=await api('orders','checkout',{...one,checkoutKey:uuid()},buyer.token);
  assert.equal(unavailable.status,409,'admin soldOut stops new orders');
+ // Real Firebase Security Rules + browser-style Firestore commit test for
+ // draft -> public pattern -> buyer download, without the Work D1 server.
+ const {savePatternToFirebase}=await import('../public/firebase-pattern-save.mjs');
+ const restFetch=(url,init)=>fetch(String(url).replace(
+  'https://firestore.googleapis.com','http://'+process.env.FIRESTORE_EMULATOR_HOST),init);
+ await db.doc('moakitUsers/'+seller.uid).set({
+  uid:seller.uid,email:seller.email,accountType:'seller',sellerStatus:'approved',
+  displayName:'Test Artist',sellerDisplayName:'Test Artist'
+ },{merge:true});
+ const newId='uploaded-'+uuid(),stamp=new Date().toISOString();
+ const newPdf='moakit/private/'+seller.uid+'/'+newId+'/'+uuid()+'.pdf';
+ const newBytes=Buffer.from('%PDF-1.4\\n1 0 obj<</Type/Catalog>>endobj\\n%%EOF\\n');
+ await bucket.file(newPdf).save(newBytes,{contentType:'application/pdf',resumable:false});
+ const profile={user:{uid:seller.uid,getIdToken:async()=>seller.token}};
+ const newDraft={id:newId,sellerUid:seller.uid,status:'draft',step:1,
+  createdAt:stamp,updatedAt:stamp,file:null,images:[],price:'25000',
+  category:'accessory',subcategory:'hat',info:{title:'New pattern',description:'Test',
+    technique:'대바늘',level:'3',sizes:'M',yarn:'Wool',amount:'3',needles:'4mm',gauge:'10cm'},
+  fieldSources:{},reviewed:true,rights:true};
+ const firstSaved=await savePatternToFirebase(profile,newDraft,{fetcher:restFetch});
+ assert.equal((await db.doc('moakitUsers/'+seller.uid+'/works/'+newId).get()).data().status,'draft');
+ const publish={...newDraft,status:'published',step:4,updatedAt:firstSaved,
+  file:{path:newPdf,name:'test.pdf',size:newBytes.length},
+  images:[{path:'moakit/public/'+seller.uid+'/'+newId+'/'+uuid()+'.webp',name:'cover'}]};
+ const publishedSaved=await savePatternToFirebase(profile,publish,{fetcher:restFetch});
+ const freshListing=(await db.doc('moakitPatterns/'+seller.uid+'_'+newId).get()).data();
+ const freshSource=(await db.doc('moakitUsers/'+seller.uid+'/works/'+newId).get()).data();
+ assert.equal(freshListing.status,'published');
+ assert.equal(freshListing.content,freshSource.publicContent);
+ assert.equal(freshSource.updatedAt,publishedSaved);
+ await assert.rejects(savePatternToFirebase(profile,{...publish,price:'10000'},{fetcher:restFetch}),/다른 기기/);
+ const freshPurchase=await api('pattern','testComplete',{id:seller.uid+'_'+newId,accepted:true},buyer2.token);
+ assert.equal(freshPurchase.status,201,JSON.stringify(freshPurchase.data));
+ const freshDownload=await api('pattern','download',{id:seller.uid+'_'+newId},buyer2.token);
+ assert.equal(freshDownload.status,200,JSON.stringify(freshDownload.data));
+ assert.ok(freshDownload.data.equals(newBytes));
+ // Firebase-only append-only registration history survives edits independently of Work.
+ const reg=await api('workRecords','capture',{sellerUid:seller.uid,workId:newId,reason:'First publication'},seller.token);
+ assert.equal(reg.status,201,JSON.stringify(reg.data));
+ const regAgain=await api('workRecords','capture',{sellerUid:seller.uid,workId:newId},seller.token);
+ assert.equal(regAgain.status,200,JSON.stringify(regAgain.data));
+ assert.equal(regAgain.data.id,reg.data.id);
+ const recordResponse=await fetch(host+'workRecords&sellerUid='+seller.uid+'&workId='+newId,{
+  headers:{Authorization:'Bearer '+seller.token}});
+ const recordRows=await recordResponse.json();
+ assert.equal(recordResponse.status,200,JSON.stringify(recordRows));
+ assert.equal(recordRows.records.length,1);
+ const verified=await fetch(host+'workRecords&verify='+reg.data.id);
+ const verifiedBody=await verified.json();
+ assert.equal(verified.status,200,JSON.stringify(verifiedBody));
+ assert.ok(verifiedBody.digest);
+ // Firebase tester call: freezes a copy in Storage, authenticated-only PDF delivery.
+ const callId='testcall_'+uuid();
+ const date=x=>new Date(Date.now()+x*86400000).toISOString();
+ const testCall={sellerUid:seller.uid,workId:newId,status:'draft',capacity:5,
+  applyStart:date(-10),applyEnd:date(-8),announceAt:date(-7),
+  testStart:date(-2),testEnd:date(30),
+  supportStatus:'disabled',createdAt:date(-11),updatedAt:date(-11),
+  content:JSON.stringify({snapshot:{title:'Firebase tester sample',sellerName:'Test Seller',
+   images:[],sourceVersion:undefined},message:'Test',conditions:[],provisions:[]}),notice:'Test notice'};
+ await db.doc('moakitTesterCalls/'+callId).set(testCall);
+ await db.doc('moakitTesterCalls/'+callId+'/applications/'+buyer.uid).set({
+  applicantUid:buyer.uid,sellerUid:seller.uid,callId,status:'confirmed',createdAt:date(-9),
+  updatedAt:date(-8),yarnId:'',yarnColor:'',content:'{}',feedback:''
+ });
+ // An existing Work encrypted grant must survive the Firebase PDF copy.
+ await db.doc('moakitTesterCalls/'+callId+'/private/file').set({
+  blob:'legacy-encrypted-grant-do-not-overwrite',expiresAt:date(30),createdAt:date(-5)
+ });
+ const draftGrant=await api('testerFile','prepare',{callId},seller.token);
+ // testerFile resource prepares from its method, not action name.
+ assert.equal(draftGrant.status,200,JSON.stringify(draftGrant.data));
+ assert.equal((await db.doc('moakitTesterCalls/'+callId+'/private/file').get()).data().blob,
+  'legacy-encrypted-grant-do-not-overwrite');
+ assert.equal((await db.doc('moakitTesterCalls/'+callId+'/private/firebaseFile').get()).exists,true);
+ const published=await api('testerPublish','publish',{callId},seller.token);
+ assert.equal(published.status,200,JSON.stringify(published.data));
+ assert.equal(published.data.status,'recruiting');
+ const testerPdf=await fetch(host+'testerFile&callId='+callId,{headers:{Authorization:'Bearer '+buyer.token}});
+ const testerBytes=Buffer.from(await testerPdf.arrayBuffer());
+ assert.equal(testerPdf.status,200,'confirmed tester receives private PDF');
+ assert.ok(testerBytes.equals(newBytes));
+ const strangerFile=await fetch(host+'testerFile&callId='+callId,{headers:{Authorization:'Bearer '+buyer2.token}});
+ assert.equal(strangerFile.status,403,'unknown buyer cannot download private tester PDF');
+ const roomPost=await api('testRoom','post',{callId,kind:'question',title:'Check details',
+  body:'Need help with cable',photos:[]},buyer.token);
+ assert.equal(roomPost.status,201,JSON.stringify(roomPost.data));
+ const roomGet=await fetch(host+'testRoom&callId='+callId,{headers:{Authorization:'Bearer '+buyer.token}});
+ const roomBody=await roomGet.json();
+ assert.equal(roomGet.status,200,JSON.stringify(roomBody));
+ assert.equal(roomBody.posts.length,1);
+ assert.equal(roomBody.posts[0].body,'Need help with cable');
+ const otherRoom=await fetch(host+'testRoom&callId='+callId,{headers:{Authorization:'Bearer '+buyer2.token}});
+ assert.equal(otherRoom.status,403);
+ const roomReply=await api('testRoom','comment',{callId,postId:roomPost.data.id,
+  body:'Read pages 1-3'},seller.token);
+ assert.equal(roomReply.status,200,JSON.stringify(roomReply.data));
+ const thread=await fetch(host+'testRoom&callId='+callId+'&post='+roomPost.data.id,{
+  headers:{Authorization:'Bearer '+buyer.token}});
+ assert.equal((await thread.json()).comments.length,1);
+ const revisionPath='moakit/private/'+seller.uid+'/'+callId+'/'+uuid()+'.pdf';
+ await bucket.file(revisionPath).save(newBytes,{contentType:'application/pdf',resumable:false});
+ const revision=await api('testRoom','resource',{callId,storagePath:revisionPath,
+  title:'Revision v2',changes:'Minor corrections'},seller.token);
+ assert.equal(revision.status,201,JSON.stringify(revision.data));
+ const revisionGet=await fetch(host+'testRoom&callId='+callId+'&file='+revision.data.id,{
+  headers:{Authorization:'Bearer '+buyer.token}});
+ assert.equal(revisionGet.status,200);
+ assert.ok(Buffer.from(await revisionGet.arrayBuffer()).equals(newBytes));
+
+ // Staged Firebase community is isolated from the legacy Work discussion.
+ const newPatternId=seller.uid+'_'+newId;
+ await db.doc('moakitUsers/'+buyer.uid).set({uid:buyer.uid,email:buyer.email,displayName:'Test Buyer',accountType:'buyer'},{merge:true});
+ const question=await api('community','create',{patternId:newPatternId,kind:'question',body:'What needles?'},buyer.token);
+ assert.equal(question.status,201,JSON.stringify(question.data));
+ const publicQuestions=await fetch(host+'community&patternId='+encodeURIComponent(newPatternId)+'&kind=question');
+ const questionRows=await publicQuestions.json();
+ assert.equal(publicQuestions.status,200,JSON.stringify(questionRows));
+ assert.equal(questionRows.total,1);
+ assert.equal(questionRows.posts[0].body,'What needles?');
+ const answer=await api('community','reply',{patternId:newPatternId,kind:'question',
+  id:question.data.id,version:1,body:'4mm'},seller.token);
+ assert.equal(answer.status,200,JSON.stringify(answer.data));
+ const reviewDenied=await api('community','create',{patternId:newPatternId,kind:'review',
+  body:'I made this'},buyer.token);
+ assert.equal(reviewDenied.status,403,'non-tester must not publish a review');
+ const deleted=await api('community','delete',{patternId:newPatternId,kind:'question',
+  id:question.data.id,version:2},buyer.token);
+ assert.equal(deleted.status,200,JSON.stringify(deleted.data));
  const prod=await addPattern(seller,'one');
  let file=await api('pattern','download',{id:prod.id},buyer.token);
  assert.equal(file.status,403);

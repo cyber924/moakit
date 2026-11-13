@@ -6,6 +6,7 @@ on:
       - firebase-diagnostic-transactions-20261112
       - simplify-commerce-no-stock-20261112
       - cleanup-work-commerce-safe-20261112
+      - work-firebase-migration-steps-1-4-20261113
   pull_request:
     branches:
       - main

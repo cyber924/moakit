@@ -1,0 +1,41 @@
+name: MOAKIT Work to Firebase migration stages
+on:
+  push:
+    branches:
+      - work-firebase-migration-steps-1-4-20261113
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: read
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check migrated modules
+        run: |
+          node --check public/firebase-pattern-save.mjs
+          node --check public/firebase-pattern-catalog.mjs
+          node --check public/legacy-order-audit.mjs
+          node --check public/seller-client.js
+          node --check public/patterns.js
+          node --check public/tester-client.js
+          node --check public/finance-firestore-admin.js
+          node --check public/admin.js
+          node --check server/admin.mjs
+          node --check server/backend-routing.mjs
+      - name: Test conversion workflows
+        run: |
+          node --test tests/work-firebase-stages.test.mjs tests/order-migration.test.mjs tests/work-commerce-cleanup.test.mjs tests/seller-core.test.mjs tests/patterns-core.test.mjs tests/tester-core.test.mjs
+      - name: Build Next.js production bundle
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build

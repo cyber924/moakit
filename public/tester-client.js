@@ -1,5 +1,6 @@
 import {encodeFields,decodeDocument,encodeValue} from './member-core.mjs';
 import {decodeCall,encodeCall,applicationRecord,ACTIVE} from './tester-core.mjs';
+import {firebaseServiceReady} from './work-independence-mode.mjs';
 const root='projects/studio-1613487721-b043c/databases/(default)/documents',base='https://firestore.googleapis.com/v1/'+root;
 export async function request(path,{F,method='GET',body,missing=false}={}){const uid=F?.user?.uid,headers={'Content-Type':'application/json'};if(F){if(!uid)throw Error('로그인 후 이용해주세요.');headers.Authorization='Bearer '+await F.user.getIdToken();}const r=await fetch(base+(path.startsWith(':')?'':'/')+path,{method,headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(25000)});const data=await r.json().catch(()=>({}));if(F&&F.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');if(missing&&r.status===404)return null;if(!r.ok){const error=Object.assign(Error(r.status===403?'테스터콜 저장·조회 권한이 필요합니다. 새 Firestore 전체 규칙을 게시했는지 확인해주세요.':r.status===409||r.status===412?'다른 요청으로 정보가 변경됐어요. 새로고침 후 다시 시도해주세요.':data.error?.message||'테스터콜 서버 연결에 실패했어요.'),{status:r.status});throw error;}return data;}
 export const get=async(path,F,missing=false)=>{const d=await request(path,{F,missing});return d?{...decodeDocument(d),_updateTime:d.updateTime,_path:path,id:d.name.split('/').pop()}:null;};
@@ -19,14 +20,45 @@ export async function transition(id,applicant,next,F,feedback){
  try{await request(':commit',{F,method:'POST',body:{writes}});}catch(e){if(changingSlot&&next==='selected'&&[403,409,412].includes(e.status))throw Error('선정하지 못했어요. 정원과 모집 상태를 새로고침해 확인해주세요.');throw e;}
 }
 export async function appPatch(id,uid,changes,F){const p=`moakitTesterCalls/${id}/applications/${uid}`,a=await get(p,F);await put(p,{...clean(a),...changes,updatedAt:new Date().toISOString()},F);}
-export async function prepareFile(id,F){const r=await fetch('/api/tester/file',{method:'POST',headers:{Authorization:'Bearer '+await F.user.getIdToken(),'Content-Type':'application/json'},body:JSON.stringify({callId:id}),signal:AbortSignal.timeout(90000)});const data=await r.json();if(!r.ok)throw Error(data.error||'테스트 PDF 준비에 실패했어요.');}
-export async function downloadFile(id,F){const r=await fetch('/api/tester/file?callId='+encodeURIComponent(id),{headers:{Authorization:'Bearer '+await F.user.getIdToken()},signal:AbortSignal.timeout(45000)});if(!r.ok){const e=await r.json().catch(()=>({}));throw Error(e.error||'테스트 도안 권한이 없어요.');}const url=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=url;a.download='MOAKIT-test-pattern.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+export async function prepareFile(id,F){
+ const ready=await firebaseServiceReady('testerFile');
+ const r=await fetch('/api/tester/file',{method:'POST',headers:{
+  Authorization:'Bearer '+await F.user.getIdToken(),'Content-Type':'application/json',
+  ...(ready?{'X-MOAKIT-FIREBASE-FEATURE':'1'}:{})
+ },body:JSON.stringify({callId:id}),signal:AbortSignal.timeout(90000)});
+ const data=await r.json().catch(()=>({}));
+ if(!r.ok)throw Error(data.error||'테스트 PDF 준비에 실패했어요.');
+ return data;
+}
+export async function downloadFile(id,F){
+ const ready=await firebaseServiceReady('testerFile');
+ const r=await fetch('/api/tester/file?callId='+encodeURIComponent(id),{
+  headers:{Authorization:'Bearer '+await F.user.getIdToken(),
+   ...(ready?{'X-MOAKIT-FIREBASE-FEATURE':'1'}:{})},
+  signal:AbortSignal.timeout(45000)});
+ if(!r.ok){const e=await r.json().catch(()=>({}));throw Error(e.error||'테스트 도안 권한이 없어요.');}
+ const url=URL.createObjectURL(await r.blob()),a=document.createElement('a');
+ a.href=url;a.download='MOAKIT-test-pattern.pdf';a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 export async function compressPhoto(file){if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024)throw Error('사진은 JPG·PNG·WebP, 10MB 이하로 선택해주세요.');const bitmap=await createImageBitmap(file);const canvas=document.createElement('canvas'),scale=Math.min(1,1200/Math.max(bitmap.width,bitmap.height));canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();for(const q of [.8,.6,.4,.25]){const value=canvas.toDataURL('image/webp',q);if(value.length<160000)return value;}throw Error('사진이 너무 복잡해요. 크기를 줄여 다시 선택해주세요.');}
 
-export async function adminRequest(F,action,values={}){const uid=F.user?.uid;if(!uid)throw Error('관리자 로그인이 필요합니다.');const r=await fetch('/api/admin',{method:'POST',headers:{Authorization:'Bearer '+await F.user.getIdToken(),'Content-Type':'application/json'},body:JSON.stringify({action,...values}),signal:AbortSignal.timeout(45000)}),d=await r.json();if(F.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');if(!r.ok)throw Object.assign(Error(d.error||'관리자 요청에 실패했어요.'),{status:r.status,code:d.code});return d;}
+export async function adminRequest(F,action,values={}){const uid=F.user?.uid;if(!uid)throw Error('관리자 로그인이 필요합니다.');const r=await fetch('/api/admin',{method:'POST',headers:{Authorization:'Bearer '+await F.user.getIdToken(),'Content-Type':'application/json','X-MOAKIT-ADMIN-LOCAL':'1'},body:JSON.stringify({action,...values}),signal:AbortSignal.timeout(45000)}),d=await r.json();if(F.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');if(!r.ok)throw Object.assign(Error(d.error||'관리자 요청에 실패했어요.'),{status:r.status,code:d.code});return d;}
 export async function sharedContent(collection,F){let pageToken='',rows=[];do{const d=await adminRequest(F,'sharedContent',{collection,pageToken});rows.push(...d.documents.map(doc=>({...decodeDocument(doc),id:doc.name.split('/').pop(),_path:doc.name.split('/documents/')[1],_updateTime:doc.updateTime})));pageToken=d.nextPageToken||'';}while(pageToken);return rows;}
 
 export async function listCalls(filters=[],F){const rows=[],seen=new Set();let cursor='';for(let page=0;page<100;page++){const clauses=filters.map(([field,value])=>({fieldFilter:{field:{fieldPath:field},op:Array.isArray(value)?'IN':'EQUAL',value:encodeValue(value)}}));const d=await request(':runQuery',{F,method:'POST',body:{structuredQuery:{from:[{collectionId:'moakitTesterCalls'}],...(clauses.length?{where:clauses.length===1?clauses[0]:{compositeFilter:{op:'AND',filters:clauses}}}:{}),orderBy:[{field:{fieldPath:'__name__'},direction:'ASCENDING'}],limit:100,...(cursor?{startAt:{values:[{referenceValue:cursor}],before:false}}:{})}}});const docs=d.filter(x=>x.document).map(x=>x.document);for(const doc of docs){if(seen.has(doc.name))continue;seen.add(doc.name);rows.push({...decodeDocument(doc),id:doc.name.split('/').pop(),_updateTime:doc.updateTime});}if(docs.length<100)break;const next=docs.at(-1).name;if(next===cursor)throw Error('모집 목록 페이지를 다시 불러와주세요.');cursor=next;}return rows;}
 export async function recoverApplications(F){const calls=await listCalls([['status',['recruiting','closed','testing','completed']]]),found=[];for(let i=0;i<calls.length;i+=5){const part=await Promise.all(calls.slice(i,i+5).map(async c=>{try{const a=await get(`moakitTesterCalls/${c.id}/applications/${F.user.uid}`,F,true);if(!a||a.applicantUid!==F.user.uid)return null;try{await put(`moakitUsers/${F.user.uid}/testerApplications/${c.id}`,{callId:c.id,applicantUid:F.user.uid,sellerUid:a.sellerUid},F);}catch{}return a;}catch(e){if([403,404].includes(e.status))return null;throw e;}}));found.push(...part.filter(Boolean));}return found;}
 
-export async function publishCall(callId,F,options={}){const uid=F.user?.uid;if(!uid)throw Error('로그인 후 이용해주세요.');const r=await fetch('/api/tester/publish',{method:'POST',headers:{Authorization:'Bearer '+await F.user.getIdToken(),'Content-Type':'application/json'},body:JSON.stringify({callId,...options}),signal:AbortSignal.timeout(120000)}),d=await r.json();if(F.user?.uid!==uid)throw Error('로그인 계정이 변경됐어요.');if(!r.ok)throw Error(d.error||'모집 공개를 완료하지 못했습니다.');return d;}
+export async function publishCall(callId,F,options={}){
+ const uid=F.user?.uid;
+ if(!uid)throw Error('로그인 후 이용해주세요.');
+ const ready=await firebaseServiceReady('testerPublish');
+ const r=await fetch('/api/tester/publish',{method:'POST',headers:{
+  Authorization:'Bearer '+await F.user.getIdToken(),'Content-Type':'application/json',
+  ...(ready?{'X-MOAKIT-FIREBASE-FEATURE':'1'}:{})
+ },body:JSON.stringify({callId,...options}),signal:AbortSignal.timeout(120000)});
+ const d=await r.json().catch(()=>({}));
+ if(F.user?.uid!==uid)throw Error('로그인 계정이 변경됐습니다.');
+ if(!r.ok)throw Error(d.error||'모집 공개·수정을 완료하지 못했습니다.');
+ return d;
+}

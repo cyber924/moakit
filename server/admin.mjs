@@ -1,11 +1,8 @@
-import {catalogUpsert,catalogDelete} from './pattern-catalog.mjs';
-import {prepareAdminRecord,finishRecord} from './work-records.mjs';
 import {editTesterContent} from './admin-tester.mjs';
 import {resolveAdmin} from './admin-access.mjs';
 import {isInitialAdmin} from '../public/admin-access.mjs';
 import {memberAdminRoles,adminFlag,changeAdministrator} from './admin-members.mjs';
 import {recommendPatternFields,recommendationContext} from './pattern-recommend.mjs';
-import {prepareDownloadGrant,readDownloadGrant} from './commerce.mjs';
 import {patternRecord,editPattern} from './admin-patterns.mjs';
 import {decodeDocument,encodeFields} from '../public/member-core.mjs';
 const API_KEY='AIzaSyAwQpw0Q9vp8q_zpGL600yY47CMcogvXxg';
@@ -24,7 +21,7 @@ export function memberChanges(current,values){
  const changes=Object.fromEntries(editable.filter(k=>next[k]!==current[k]).map(k=>[k,next[k]]));
  if(!Object.keys(changes).length)throw fail('변경된 내용이 없습니다.',400);return changes;
 }
-export async function adminApi(request,fetcher=fetch,env={}){
+export async function adminApi(request,fetcher=fetch,env=process.env){
  try{
  if(request.method!=='POST')return reply({error:'POST 요청만 지원합니다.'},405);
  const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)return reply({error:'다른 사이트의 요청은 허용하지 않습니다.'},403);
@@ -64,21 +61,36 @@ export async function adminApi(request,fetcher=fetch,env={}){
  const rows=await db(':runQuery',{method:'POST',body:{structuredQuery:{...from('moakitUsers'),orderBy:[{field:{fieldPath:'__name__'},direction:'ASCENDING'}],limit:101,...(cursor?{startAt:{values:[{referenceValue:root+'/moakitUsers/'+cursor}],before:false}}:{})}}});const docs=rows.filter(r=>r.document).map(r=>r.document);return reply({members:await (async()=>{const roles=await memberAdminRoles(db);return docs.slice(0,100).map(d=>{const m={...decodeDocument(d),uid:d.name.split('/').pop()};return {...m,isAdministrator:adminFlag(m,roles)};});})(),nextCursor:docs.length>100?docs[99].name.split('/').pop():null});
  }
  if(body.action==='patternDetail'){
- const id=body.id;if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,260}$/.test(id))throw fail('도안 주소를 확인해주세요.',400);
- const r=patternRecord(await db('/moakitPatterns/'+id));try{await readDownloadGrant(r.data.downloadGrant,r.id,env);r.fileReady=true;}catch{r.fileReady=false;r.fileIssue='원본 PDF 연결을 확인해주세요.';}return reply({pattern:r});
+  const id=body.id;if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,260}$/.test(id))throw fail('도안 주소를 확인해주세요.',400);
+  const record=patternRecord(await db('/moakitPatterns/'+encodeURIComponent(id)));
+  // Check a saved source pointer, not a Work/D1 download grant. The Firebase
+  // commerce function independently verifies the actual PDF before checkout.
+  try{
+   const source=decodeDocument(await db('/moakitUsers/'+record.sellerUid+'/works/'+record.sourceId));
+   const original=JSON.parse(source.content||'{}'),pdf=original.file;
+   record.fileReady=typeof pdf?.path==='string'&&pdf.path.startsWith(
+    'moakit/private/'+record.sellerUid+'/'+record.sourceId+'/')&&pdf.path.endsWith('.pdf');
+   if(!record.fileReady)record.fileIssue='Firebase 원본 PDF 저장 경로를 확인해주세요.';
+  }catch{
+   record.fileReady=false;record.fileIssue='Firebase 작품 원본을 읽지 못했습니다.';
+  }
+  return reply({pattern:record});
  }
  if(body.action==='patterns'){
- const pageToken=body.pageToken||'';if(typeof pageToken!=='string'||pageToken.length>4000)throw fail('도안 페이지 정보를 확인해주세요.',400);
- const result=await db('/moakitPatterns?pageSize=20'+(pageToken?'&pageToken='+encodeURIComponent(pageToken):''));
- const patterns=(result.documents||[]).map(patternRecord);let cursor=0;
- await Promise.all(Array.from({length:Math.min(4,patterns.length)},async()=>{while(cursor<patterns.length){const r=patterns[cursor++];if(r.invalid)continue;try{
- let ready=false;try{await readDownloadGrant(r.data.downloadGrant,r.id,env);ready=true;}catch{}
- if(!ready){const source=decodeDocument(await db('/moakitUsers/'+r.sellerUid+'/works/'+r.sourceId));r.data.downloadGrant=await prepareDownloadGrant(r.id,r,JSON.parse(source.content),bearer,env,fetcher);
- await db(':commit',{method:'POST',body:{writes:[{update:{name:root+'/moakitPatterns/'+r.id,fields:encodeFields({content:JSON.stringify(r.data)})},updateMask:{fieldPaths:['content']},currentDocument:{updateTime:r.version}}]}});
- const saved=patternRecord(await db('/moakitPatterns/'+r.id));Object.assign(r,saved);}
- r.fileReady=true;
- }catch(e){r.fileReady=false;if([409,412].includes(e.status)){try{const saved=patternRecord(await db('/moakitPatterns/'+r.id));await readDownloadGrant(saved.data.downloadGrant,r.id,env);Object.assign(r,saved);r.fileReady=true;}catch{}}if(!r.fileReady)r.fileIssue='원본 PDF 자동 준비를 완료하지 못했습니다.';}}}));
- return reply({patterns,nextPageToken:result.nextPageToken||null});
+  const pageToken=body.pageToken||'';
+  if(typeof pageToken!=='string'||pageToken.length>4000)throw fail('도안 페이지 정보를 확인해주세요.',400);
+  const result=await db('/moakitPatterns?pageSize=50'+(pageToken?'&pageToken='+encodeURIComponent(pageToken):''));
+  const patterns=(result.documents||[]).map(patternRecord);
+  // Read-only Firebase metadata; never re-create Work download grants.
+  await Promise.all(patterns.map(async p=>{
+   try{
+    const source=decodeDocument(await db('/moakitUsers/'+p.sellerUid+'/works/'+p.sourceId));
+    const raw=JSON.parse(source.content||'{}'),path=raw.file?.path;
+    p.fileReady=typeof path==='string'&&path.startsWith('moakit/private/'+p.sellerUid+'/'+p.sourceId+'/')&&/\\.pdf$/i.test(path);
+   }catch{p.fileReady=false;}
+   if(!p.fileReady)p.fileIssue='PDF 원본 경로 확인 필요';
+  }));
+  return reply({patterns,nextPageToken:result.nextPageToken||null});
  }
  if(['deletePattern','suggestPattern','recommendPatternFields'].includes(body.action)){
  const id=body.id;if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,260}$/.test(id))throw fail('도안 주소를 확인해주세요.',400);
@@ -100,17 +112,27 @@ export async function adminApi(request,fetcher=fetch,env={}){
  return reply({suggestion:{description:suggestion.description.trim()}});
  }
  if(body.version!==doc.updateTime)throw fail('도안 정보가 변경됐습니다. 다시 불러와주세요.',409);
- const recordId=await prepareAdminRecord({record,user,bearer,env,fetcher,deleted:true});
- try{await db(':commit',{method:'POST',body:{writes:[{delete:root+'/moakitPatterns/'+id,currentDocument:{updateTime:doc.updateTime}}]}});}catch(e){await finishRecord(env,recordId,false);throw e;}await finishRecord(env,recordId);
- try{await catalogDelete(env,id);}catch{console.warn('PATTERN_CATALOG_SYNC_PENDING');}return reply({deleted:true});
+ // Soft-delete keeps historical PDF purchases, seller source and audit intact.
+ // Work registration history is deliberately not removed by this action.
+ await db(':commit',{method:'POST',body:{writes:[{
+   update:{name:doc.name,fields:encodeFields({status:'suspended',updatedAt:new Date().toISOString()})},
+   updateMask:{fieldPaths:['status','updatedAt']},currentDocument:{updateTime:doc.updateTime}
+ }]}});
+ return reply({deleted:true,suspended:true,preserved:true});
  }
  if(body.action==='updatePattern'){
  const id=body.id;if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,260}$/.test(id))throw fail('도안 주소를 확인해주세요.',400);
  const doc=await db('/moakitPatterns/'+encodeURIComponent(id)),record=patternRecord(doc);if(typeof body.version!=='string'||body.version!==doc.updateTime)throw fail('도안 정보가 변경됐습니다. 다시 불러온 후 저장해주세요.',409);
  const next=editPattern(record,body.changes);
- const recordId=await prepareAdminRecord({record,next,user,bearer,env,fetcher});
- try{await db(':commit',{method:'POST',body:{writes:[{update:{name:root+'/moakitPatterns/'+id,fields:encodeFields(next)},updateMask:{fieldPaths:Object.keys(next)},currentDocument:{updateTime:doc.updateTime}}]}});}catch(e){await finishRecord(env,recordId,false);throw e;}await finishRecord(env,recordId);
- const saved=await db('/moakitPatterns/'+encodeURIComponent(id));try{await catalogUpsert(env,saved,bearer,fetcher);}catch{console.warn('PATTERN_CATALOG_SYNC_PENDING');}return reply({saved:true,pattern:patternRecord(saved)});
+ // New admin corrections use the same Firestore document as buyer catalog.
+ // Previous Work registration records remain untouched and readable.
+ await db(':commit',{method:'POST',body:{writes:[{
+  update:{name:root+'/moakitPatterns/'+id,fields:encodeFields(next)},
+  updateMask:{fieldPaths:Object.keys(next)},
+  currentDocument:{updateTime:doc.updateTime}
+ }]}});
+ const saved=await db('/moakitPatterns/'+encodeURIComponent(id));
+ return reply({saved:true,pattern:patternRecord(saved),storage:'firebase'});
  }
  const uid=body.uid;if(typeof uid!=='string'||!uid||uid.length>128||uid.includes('/'))throw fail('회원을 선택해주세요.',400);
  if(body.action==='member') {const doc=await db('/moakitUsers/'+encodeURIComponent(uid));const m=decodeDocument(doc),roles=await memberAdminRoles(db);return reply({member:{...m,isAdministrator:adminFlag(m,roles)},version:doc.updateTime});}

@@ -29,10 +29,20 @@ test('unknown endpoints and unsafe methods cannot be used as open proxies', () =
   }
   assert.equal(backendRoute(new Request(host + '/api/admin', {method:'DELETE'})).status,405);
 });
-test('PDF extraction stays local while all 24 existing service endpoints keep the same backend', () => {
+test('Work remains only for explicitly unconverted routes, while Firebase-migrated endpoints are local', () => {
   assert.equal(backendRoute(new Request(host + '/api/seller/extract')).local,true);
   assert.equal(SHARED_API_PATHS.size,24);
-  for (const path of SHARED_API_PATHS) assert.equal(new URL(backendRoute(new Request(host + path)).target).origin,BACKEND_ORIGIN);
+  for (const path of SHARED_API_PATHS){
+   const response=backendRoute(new Request(host + path));
+   assert.equal(new URL(response.target).origin,BACKEND_ORIGIN,path);
+  }
+  for(const path of ['/api/pattern-catalog','/api/pattern-admin']){
+   assert.equal(backendRoute(new Request(host+path,{headers:{'x-moakit-firebase-feature':'1'}})).local,true,path);
+  }
+  for(const path of ['/api/community','/api/test-room','/api/work-records','/api/tester/file','/api/tester/publish']){
+   assert.equal(backendRoute(new Request(host+path,{headers:{'x-moakit-firebase-feature':'1'}})).local,true,path);
+   assert.equal(new URL(backendRoute(new Request(host+path)).target).origin,BACKEND_ORIGIN,path);
+  }
 });
 
 test('Firebase-only admin reads are local, while all D1 and write actions stay on Work', () => {
