@@ -1,4 +1,5 @@
 import {detailTemplate,galleryPhoto,levelMarkup} from './detail-template.mjs';
+import {firebaseServiceReady} from './work-independence-mode.mjs';
 import {DEFAULT_FILTERS,normalizeFilters,filterWorks,filtersToQuery,queryToFilters} from './patterns-core.mjs';
 const UI=window.MoaUI,{categories}=window.MoaCatalog,esc=UI.escapeHtml;
 let works=[],catalogView='all',catalogLoading=true,catalogError='';const samples=window.MoaCatalog.works;
@@ -53,10 +54,12 @@ async function loadCatalog(){
  try{
   let page=1,rows=[];
   do{
+   const ready=await firebaseServiceReady('catalog');
    const response=await fetch('/api/pattern-catalog?'+new URLSearchParams({view:catalogView,page,size:50}),{
+    headers:ready?{'X-MOAKIT-FIREBASE-FEATURE':'1'}:{},
     cache:'no-store',signal:AbortSignal.timeout(30000)});
    const result=await response.json();
-   if(!response.ok||!result.ready)throw Error(result.error||'Firebase 도안 목록을 불러오지 못했습니다.');
+   if(!response.ok)throw Error(result.error||'도안 목록을 불러오지 못했습니다.');
    rows.push(...result.patterns);
    if(page>=result.pages)break;
    if(++page>100)throw Error('도안 목록을 나누어 조회해주세요.');
