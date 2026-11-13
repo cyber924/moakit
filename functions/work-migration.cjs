@@ -4,7 +4,7 @@
 const ORIGIN='https://moakit-home.herestay-4226.chatgpt.site';
 const ID=/^[A-Za-z0-9_-]{1,260}$/;
 const FIELDS=['popular','recommended','weeklyBest','rank','weeklyStart','weeklyEnd'];
-module.exports=function migration({db,adminSession,now,fail,json}){
+module.exports=function migration({db,adminSession,now,fail,json,testerFile}){
  async function source(path,token){
   const response=await fetch(ORIGIN+path,{method:'GET',headers:{
    Authorization:'Bearer '+token,Origin:ORIGIN,Accept:'application/json'
@@ -82,13 +82,48 @@ module.exports=function migration({db,adminSession,now,fail,json}){
   },{merge:true});
   return {...report,ready:true,saved:updates.length,notice:'도안 노출 설정을 Firebase로 이전했습니다. 기존 Work 원본은 그대로 유지합니다.'};
  }
+ async function testerPdfMigration(user,action){
+  const docs=await db.collection('moakitTesterCalls').limit(201).get();
+  if(docs.size>=201)throw fail('테스터 공고 200건 초과 · 페이지별로 이전해야 합니다.',503);
+  const live=docs.docs.filter(d=>['recruiting','closed','testing','completed'].includes(d.data().status));
+  const status={total:live.length,ready:0,copied:0,failed:0,examples:[]};
+  for(const doc of live){
+   try{
+    const grant=await doc.ref.collection('private').doc('firebaseFile').get();
+    let verified=false;
+    if(grant.exists){
+     const value=JSON.parse(grant.data().blob||'{}');
+     verified=value.format==='firebase-v2'&&value.callId===doc.id&&
+      value.sellerUid===doc.data().sellerUid&&
+      (await testerFile.checkStorage(value.path));
+    }
+    if(verified){status.ready++;continue;}
+    if(action==='auditTesterPdf'){status.failed++;if(status.examples.length<6)status.examples.push(doc.id+': Firebase PDF 이전 필요');continue;}
+    await testerFile.ensure(doc.id,doc.data());
+    const check=await doc.ref.collection('private').doc('firebaseFile').get();
+    if(!check.exists)throw Error('저장된 제공권한이 없습니다.');
+    status.copied++;status.ready++;
+   }catch(e){
+    status.failed++;
+    if(status.examples.length<6)status.examples.push(doc.id+': '+String(e.message||'PDF 원본을 확인할 수 없습니다.').slice(0,100));
+   }
+  }
+  if(action==='migrateTesterPdf'&&!status.failed){
+   await db.doc('moakitSettings/workIndependence').set({
+    testerFileReady:true,testerPdfMigratedCount:status.ready,
+    testerPdfMigratedAt:now(),testerPdfMigratedBy:user.uid
+   },{merge:true});
+  }
+  return {...status,activated:action==='migrateTesterPdf'&&!status.failed,
+   notice:status.failed?'테스터 PDF 제공권한 이전을 완료하지 못했습니다. Work 다운로드를 유지합니다.':'원본 Work 파일을 삭제하지 않고 Firebase 제공 권한을 점검했습니다.'};
+ }
  async function route(req,res){
   if(req.method!=='POST')throw fail('POST 요청만 허용합니다.',405);
   const user=await adminSession(req),body=req.body||{};
-  if(!['auditCatalog','migrateCatalog'].includes(body.action))
+  if(!['auditCatalog','migrateCatalog','auditTesterPdf','migrateTesterPdf'].includes(body.action))
    throw fail('지원하지 않는 이전 작업입니다.',400);
   const token=String(req.headers.authorization||'');
-  const result=await catalog(req,user,token,body.action);
+  const result=body.action.endsWith('TesterPdf')?await testerPdfMigration(user,body.action):await catalog(req,user,token,body.action);
   return json(res,result);
  }
  return route;
