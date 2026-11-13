@@ -52,7 +52,7 @@ module.exports=function workRecordService({db,now,session,adminSession,fail,json
    if(sourceData.sellerUid!==sellerUid)throw fail('작가 정보가 일치하지 않습니다.',403);
    let d;
    try{d=JSON.parse(sourceData.content||'{}');}catch{throw fail('작품 원본 정보를 읽을 수 없습니다.',409);}
-   if(!d||d.id!==workId||d.sellerUid!==sellerUid)throw fail('도안 소유자와 원본을 확인해주세요.',409);
+   if(!d||(d.id!==undefined&&d.id!==workId)||(d.sellerUid!==undefined&&d.sellerUid!==sellerUid))throw fail('도안 소유자와 원본을 확인해주세요.',409);
    const state=previous.data()||{},fingerprint=sha([sourceData.updatedAt,sourceData.content,sourceData.status]);
    if(state.fingerprint===fingerprint)return {id:state.latestId,sequence:state.sequence,reused:true};
    const sequence=Number(state.sequence||0)+1;
