@@ -26,7 +26,7 @@ export function backendRoute(request) {
   if (['/api/shop','/api/kits/orders','/api/kits'].includes(url.pathname) && request.headers.get('x-moakit-firebase-commerce') === '1') return { local: true };
   if (url.pathname === '/api/admin-system-health' && request.method === 'POST') return { local: true };
   if (url.pathname === '/api/community-firebase' || url.pathname === '/api/test-room-firebase' || url.pathname === '/api/work-records-firebase'
-    || url.pathname === '/api/work-independence-status') return { local: true };
+    || url.pathname === '/api/work-independence-status' || url.pathname === '/api/work-migration') return { local: true };
   // This header is only emitted after an authenticated server readiness check.
   // Until historical migration is complete, existing Work reads stay intact.
   const independent=new Set(['/api/community','/api/test-room','/api/work-records',
