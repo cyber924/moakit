@@ -117,13 +117,77 @@ module.exports=function migration({db,adminSession,now,fail,json,testerFile}){
   return {...status,activated:action==='migrateTesterPdf'&&!status.failed,
    notice:status.failed?'테스터 PDF 제공권한 이전을 완료하지 못했습니다. Work 다운로드를 유지합니다.':'원본 Work 파일을 삭제하지 않고 Firebase 제공 권한을 점검했습니다.'};
  }
+ async function supportArchive(user,token,action){
+  const previous=(await db.doc('moakitSettings/workIndependence').get()).data()||{};
+  if(action==='migrateSupport'&&previous.supportReady===true)
+   return {ready:true,already:true,source:previous.supportMigratedCount||0,
+    saved:0,missing:0,examples:[],notice:'이미 Firebase 문의·신고 경로를 사용 중입니다.'};
+  const rows=[],ids=new Set();
+  for(let page=1;page<=50;page++){
+   const data=await source('/api/support?'+new URLSearchParams({admin:'1',page}),token);
+   if(!Array.isArray(data.tickets)||!Number.isInteger(data.pages))
+    throw fail('Work 문의·신고 원본 목록 형식을 확인해주세요.',503);
+   for(const row of data.tickets){
+    if(!ID.test(row.id)||!ID.test(row.ownerUid)||ids.has(row.id))
+     throw fail('문의 접수번호가 유효하지 않거나 중복됐습니다.',409);
+    ids.add(row.id);rows.push(row);
+   }
+   if(page>=data.pages)break;
+   if(page===50)throw fail('문의 목록 50페이지 초과 · 분할 이전이 필요합니다.',503);
+  }
+  if(rows.length>1000)throw fail('기존 문의 1,000건 초과 · 분할 이전이 필요합니다.',503);
+  const existing=await db.collection('moakitSupportTickets').limit(1001).get();
+  if(existing.size>=1001)throw fail('Firebase 문의가 1,000건을 넘었습니다.',503);
+  const known=new Map(existing.docs.map(d=>[d.id,d.data()]));
+  const missing=rows.filter(row=>!known.has(row.id));
+  const conflicts=rows.filter(row=>known.has(row.id)&&
+   (known.get(row.id).ownerUid!==row.ownerUid||known.get(row.id).kind!==row.kind||
+    (known.get(row.id).version||1)<row.version));
+  const report={source:rows.length,firebase:known.size,missing:missing.length,
+   conflicts:conflicts.length,examples:conflicts.slice(0,5).map(x=>x.id),
+   ready:previous.supportReady===true};
+  if(action==='auditSupport')return report;
+  if(conflicts.length)throw fail('과거 문의와 Firebase 기록 '+conflicts.length+'건이 일치하지 않습니다.',409);
+  const prepared=[];
+  for(const brief of missing){
+   const detail=await source('/api/support?'+new URLSearchParams({admin:'1',id:brief.id}),token);
+   const t=detail.ticket;
+   if(!t||t.id!==brief.id||t.ownerUid!==brief.ownerUid||!Array.isArray(t.history)||
+     !Array.isArray(t.attachments)||t.attachments.length>3)
+    throw fail('Work 문의의 회원 소유권·첨부를 검증할 수 없습니다: '+brief.id,409);
+   const record={id:t.id,ownerUid:t.ownerUid,ownerName:String(t.ownerName||'회원').slice(0,100),
+    kind:t.kind,title:t.title,body:t.body,relatedHref:t.relatedHref||'',
+    attachments:t.attachments,status:t.status,reply:t.reply||'',
+    internalNote:t.internalNote||'',assignee:t.assignee||'',history:t.history,
+    version:t.version,createdAt:t.createdAt,updatedAt:t.updatedAt,source:'work-d1-import'};
+   if(Buffer.byteLength(JSON.stringify(record),'utf8')>=950000)
+    throw fail('첨부가 큰 문의는 별도 Storage 이전이 필요합니다: '+brief.id,413);
+   prepared.push(record);
+  }
+  // Individual creates make retries safe after a partial network failure.
+  for(const record of prepared){
+   try{await db.collection('moakitSupportTickets').doc(record.id).create(record);}
+   catch(e){if(e.code!==6&&e.code!=='already-exists')throw e;}
+  }
+  const verified=await db.collection('moakitSupportTickets').limit(1001).get();
+  const idsVerified=new Set(verified.docs.map(d=>d.id));
+  if(rows.some(x=>!idsVerified.has(x.id)))
+   throw fail('문의 데이터 수가 일치하지 않습니다. 이전 상태를 다시 점검해주세요.',409);
+  const savedAt=now();
+  await db.doc('moakitSettings/workIndependence').set({
+   supportReady:true,supportMigratedAt:savedAt,supportMigratedCount:rows.length,
+   supportMigratedBy:user.uid,updatedAt:savedAt
+  },{merge:true});
+  return {...report,ready:true,saved:prepared.length,missing:0,
+   notice:'모든 기존 문의를 Firebase에서 확인했습니다. Work 원본은 삭제하지 않습니다.'};
+ }
  async function route(req,res){
   if(req.method!=='POST')throw fail('POST 요청만 허용합니다.',405);
   const user=await adminSession(req),body=req.body||{};
-  if(!['auditCatalog','migrateCatalog','auditTesterPdf','migrateTesterPdf'].includes(body.action))
+  if(!['auditCatalog','migrateCatalog','auditTesterPdf','migrateTesterPdf','auditSupport','migrateSupport'].includes(body.action))
    throw fail('지원하지 않는 이전 작업입니다.',400);
   const token=String(req.headers.authorization||'');
-  const result=body.action.endsWith('TesterPdf')?await testerPdfMigration(user,body.action):await catalog(req,user,token,body.action);
+  const result=body.action.endsWith('Support')?await supportArchive(user,token,body.action):body.action.endsWith('TesterPdf')?await testerPdfMigration(user,body.action):await catalog(req,user,token,body.action);
   return json(res,result);
  }
  return route;
