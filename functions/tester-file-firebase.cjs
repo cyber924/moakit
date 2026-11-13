@@ -26,7 +26,9 @@ module.exports=function createTesterFile({db,bucket,session,adminSession,now,fai
   return {file,selected};
  }
  async function ensure(callId,call){
-  const ref=db.doc('moakitTesterCalls/'+callId+'/private/file');
+  // Never overwrite Work's encrypted /private/file grant: the old backend
+  // must remain functional until all old calls have migrated.
+  const ref=db.doc('moakitTesterCalls/'+callId+'/private/firebaseFile');
   const doc=await ref.get();
   let old=null;
   if(doc.exists){try{old=JSON.parse(doc.data()?.blob||'')}catch{}}
@@ -87,7 +89,7 @@ module.exports=function createTesterFile({db,bucket,session,adminSession,now,fai
  testerFileRoute.refreshExpiry=async(callId,call)=>{
   const record=await ensure(callId,call);
   const expiresAt=new Date(Date.parse(call.testEnd)+7*86400000).toISOString();
-  await db.doc('moakitTesterCalls/'+callId+'/private/file').update({expiresAt});
+  await db.doc('moakitTesterCalls/'+callId+'/private/firebaseFile').update({expiresAt});
   return {...record,expiresAt};
  };
  return testerFileRoute;
