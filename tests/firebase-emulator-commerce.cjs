@@ -139,6 +139,73 @@ async function run(){
  const freshDownload=await api('pattern','download',{id:seller.uid+'_'+newId},buyer2.token);
  assert.equal(freshDownload.status,200,JSON.stringify(freshDownload.data));
  assert.ok(freshDownload.data.equals(newBytes));
+ // Firebase-only append-only registration history survives edits independently of Work.
+ const reg=await api('workRecords','capture',{sellerUid:seller.uid,workId:newId,reason:'First publication'},seller.token);
+ assert.equal(reg.status,201,JSON.stringify(reg.data));
+ const regAgain=await api('workRecords','capture',{sellerUid:seller.uid,workId:newId},seller.token);
+ assert.equal(regAgain.status,200,JSON.stringify(regAgain.data));
+ assert.equal(regAgain.data.id,reg.data.id);
+ const recordResponse=await fetch(host+'workRecords&sellerUid='+seller.uid+'&workId='+newId,{
+  headers:{Authorization:'Bearer '+seller.token}});
+ const recordRows=await recordResponse.json();
+ assert.equal(recordResponse.status,200,JSON.stringify(recordRows));
+ assert.equal(recordRows.records.length,1);
+ const verified=await fetch(host+'workRecords&verify='+reg.data.id);
+ const verifiedBody=await verified.json();
+ assert.equal(verified.status,200,JSON.stringify(verifiedBody));
+ assert.ok(verifiedBody.digest);
+ // Firebase tester call: freezes a copy in Storage, authenticated-only PDF delivery.
+ const callId='testcall_'+uuid();
+ const date=x=>new Date(Date.now()+x*86400000).toISOString();
+ const testCall={sellerUid:seller.uid,workId:newId,status:'draft',capacity:5,
+  applyStart:date(-10),applyEnd:date(-8),announceAt:date(-7),
+  testStart:date(-2),testEnd:date(30),
+  supportStatus:'disabled',createdAt:date(-11),updatedAt:date(-11),
+  content:JSON.stringify({snapshot:{title:'Firebase tester sample',sellerName:'Test Seller',
+   images:[],sourceVersion:undefined},message:'Test',conditions:[],provisions:[]}),notice:'Test notice'};
+ await db.doc('moakitTesterCalls/'+callId).set(testCall);
+ await db.doc('moakitTesterCalls/'+callId+'/applications/'+buyer.uid).set({
+  applicantUid:buyer.uid,sellerUid:seller.uid,callId,status:'confirmed',createdAt:date(-9),
+  updatedAt:date(-8),yarnId:'',yarnColor:'',content:'{}',feedback:''
+ });
+ const draftGrant=await api('testerFile','prepare',{callId},seller.token);
+ // testerFile resource prepares from its method, not action name.
+ assert.equal(draftGrant.status,200,JSON.stringify(draftGrant.data));
+ const published=await api('testerPublish','publish',{callId},seller.token);
+ assert.equal(published.status,200,JSON.stringify(published.data));
+ assert.equal(published.data.status,'recruiting');
+ const testerPdf=await fetch(host+'testerFile&callId='+callId,{headers:{Authorization:'Bearer '+buyer.token}});
+ const testerBytes=Buffer.from(await testerPdf.arrayBuffer());
+ assert.equal(testerPdf.status,200,'confirmed tester receives private PDF');
+ assert.ok(testerBytes.equals(newBytes));
+ const strangerFile=await fetch(host+'testerFile&callId='+callId,{headers:{Authorization:'Bearer '+buyer2.token}});
+ assert.equal(strangerFile.status,403,'unknown buyer cannot download private tester PDF');
+ const roomPost=await api('testRoom','post',{callId,kind:'question',title:'Check details',
+  body:'Need help with cable',photos:[]},buyer.token);
+ assert.equal(roomPost.status,201,JSON.stringify(roomPost.data));
+ const roomGet=await fetch(host+'testRoom&callId='+callId,{headers:{Authorization:'Bearer '+buyer.token}});
+ const roomBody=await roomGet.json();
+ assert.equal(roomGet.status,200,JSON.stringify(roomBody));
+ assert.equal(roomBody.posts.length,1);
+ assert.equal(roomBody.posts[0].body,'Need help with cable');
+ const otherRoom=await fetch(host+'testRoom&callId='+callId,{headers:{Authorization:'Bearer '+buyer2.token}});
+ assert.equal(otherRoom.status,403);
+ const roomReply=await api('testRoom','comment',{callId,postId:roomPost.data.id,
+  body:'Read pages 1-3'},seller.token);
+ assert.equal(roomReply.status,200,JSON.stringify(roomReply.data));
+ const thread=await fetch(host+'testRoom&callId='+callId+'&post='+roomPost.data.id,{
+  headers:{Authorization:'Bearer '+buyer.token}});
+ assert.equal((await thread.json()).comments.length,1);
+ const revisionPath='moakit/private/'+seller.uid+'/'+callId+'/'+uuid()+'.pdf';
+ await bucket.file(revisionPath).save(newBytes,{contentType:'application/pdf',resumable:false});
+ const revision=await api('testRoom','resource',{callId,storagePath:revisionPath,
+  title:'Revision v2',changes:'Minor corrections'},seller.token);
+ assert.equal(revision.status,201,JSON.stringify(revision.data));
+ const revisionGet=await fetch(host+'testRoom&callId='+callId+'&file='+revision.data.id,{
+  headers:{Authorization:'Bearer '+buyer.token}});
+ assert.equal(revisionGet.status,200);
+ assert.ok(Buffer.from(await revisionGet.arrayBuffer()).equals(newBytes));
+
  // Staged Firebase community is isolated from the legacy Work discussion.
  const newPatternId=seller.uid+'_'+newId;
  await db.doc('moakitUsers/'+buyer.uid).set({uid:buyer.uid,email:buyer.email,displayName:'Test Buyer',accountType:'buyer'},{merge:true});
