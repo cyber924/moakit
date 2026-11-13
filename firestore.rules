@@ -512,6 +512,51 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // 공지와 문의는 브라우저의 Firebase 로그인 권한으로 접근합니다.
+    match /moakitNotices/{noticeId} {
+      function memberAudience() {
+        return signedIn() && resource.data.status == 'published' && (
+          resource.data.audience == 'all'
+          || (resource.data.audience == 'individual' && resource.data.recipientUid == request.auth.uid)
+          || (resource.data.audience == 'seller' &&
+            (get(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)).data.accountType == 'seller'
+              || get(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)).data.sellerStatus == 'approved'))
+          || (resource.data.audience == 'buyer' &&
+            get(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)).data.accountType != 'seller'
+            && get(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)).data.sellerStatus != 'approved')
+        );
+      }
+      allow read: if admin() || memberAudience();
+      allow create, update, delete: if admin();
+    }
+    match /moakitSupportTickets/{ticketId} {
+      function newTicket() {
+        let d = request.resource.data;
+        return exactKeys(d, ['kind','title','body','relatedHref','ownerUid','ownerName','attachments',
+          'status','reply','createdAt','updatedAt','version','history'])
+          && d.ownerUid == request.auth.uid && d.kind in ['pattern','order','tester','report','other']
+          && d.title is string && d.title.size() >= 2 && d.title.size() <= 120
+          && d.body is string && d.body.size() >= 5 && d.body.size() <= 5000
+          && text(d.relatedHref, 300) && text(d.ownerName, 100)
+          && d.attachments is list && d.attachments.size() <= 3
+          && d.status == 'received' && d.reply == '' && d.version == 1
+          && d.history is list && d.history.size() == 0
+          && d.createdAt is string && d.updatedAt is string;
+      }
+      allow get, list: if admin() || owner(resource.data.ownerUid);
+      allow create: if signedIn() && newTicket();
+      allow update, delete: if admin();
+    }
+    match /moakitSupportPrivate/{ticketId} {
+      allow read, write: if admin();
+    }
+    match /moakitNotificationReads/{uid}/items/{itemId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && exactKeys(request.resource.data, ['readAt'])
+        && request.resource.data.readAt is string;
+      allow delete: if owner(uid);
+    }
+
     match /{document=**} { allow read, write: if false; }
   }
 }

@@ -1,0 +1,7 @@
+{
+  "indexes": [
+    {"collectionGroup":"moakitNotices","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"audience","order":"ASCENDING"}]},
+    {"collectionGroup":"moakitNotices","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"audience","order":"ASCENDING"},{"fieldPath":"recipientUid","order":"ASCENDING"}]}
+  ],
+  "fieldOverrides": []
+}
