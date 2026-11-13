@@ -1,6 +1,6 @@
 // Stable project URL only; no Vercel secret, arbitrary proxy target or client-controlled host.
 const ENDPOINT='https://asia-northeast3-studio-1613487721-b043c.cloudfunctions.net/moakitCommerce';
-type Resource='status'|'health'|'kits'|'orders'|'pattern'|'finance'|'diagnostics'|'cutover'|'community';
+type Resource='status'|'health'|'kits'|'orders'|'pattern'|'finance'|'diagnostics'|'cutover'|'community'|'workRecords'|'testerFile'|'testerPublish'|'testRoom';
 const makeUrl=(request:Request,resource:Resource)=>{
  const incoming=new URL(request.url),upstream=new URL(ENDPOINT);
  for(const [key,value] of incoming.searchParams)if(key!=='resource')upstream.searchParams.append(key,value);
