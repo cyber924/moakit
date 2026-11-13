@@ -74,7 +74,8 @@ async function statusRoute(req,res){
  const migration=await db.doc('moakitSettings/workIndependence').get();
  const ready=migration.data()||{};
  json(res,{active:enabled,mode:enabled?'firebase':'legacy',engine:'firebase-functions-v2',
-  services:{records:true,testerFile:ready.testerFileReady===true,
+  services:{records:true,notifications:true,support:ready.supportReady===true,
+   testerFile:ready.testerFileReady===true,
    testerPublish:ready.testerPublishReady===true,
    catalog:ready.catalogReady===true,migration:true,
    testRoom:ready.testRoomReady===true,community:ready.communityReady===true}});
@@ -587,6 +588,7 @@ async function cutoverRoute(req,res){
   notice:'기존 구매 기록은 Work 조회 경로에 그대로 보존됩니다.'});
 }
 const communityRoute=require('./community.cjs')({db,now,session,adminSession,fail,json});
+const communications=require('./communications.cjs')({db,now,session,adminSession,fail,json});
 const workRecordsRoute=require('./work-records.cjs')({db,now,session,adminSession,fail,json});
 const testerFileRoute=require('./tester-file-firebase.cjs')({db,bucket,now,session,adminSession,fail,json});
 const testerPublishRoute=require('./tester-publish-firebase.cjs')({db,now,session,adminSession,
@@ -602,8 +604,9 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
  maxInstances:10,invoker:'public'},async(req,res)=>{
  try{
   if(req.method==='OPTIONS')throw fail('지원하지 않는 요청입니다.',405);
-  if(JSON.stringify(req.body||{}).length>500000)throw fail('요청 크기를 줄여주세요.',413);
   const resource=String(req.query.resource||'');
+  const length=JSON.stringify(req.body||{}).length;
+  if(length>(resource==='support'?900000:500000))throw fail('요청 크기를 줄여주세요.',413);
   if(resource==='status')return await statusRoute(req,res);
   if(resource==='health')return await healthRoute(req,res);
   if(resource==='cutover')return await cutoverRoute(req,res);
@@ -615,6 +618,8 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   if(resource==='testRoom')return await testerRoomRoute(req,res);
   if(resource==='workMigration')return await workMigrationRoute(req,res);
   if(resource==='community')return await communityRoute(req,res);
+  if(resource==='notifications')return await communications.notifications(req,res);
+  if(resource==='support')return await communications.supportRoute(req,res);
   // Staged requests are allowed only for authenticated administrators.
   if(!await active()){
    const staging=req.headers['x-moakit-staging']==='1';
