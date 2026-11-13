@@ -580,6 +580,11 @@ async function cutoverRoute(req,res){
   notice:'기존 구매 기록은 Work 조회 경로에 그대로 보존됩니다.'});
 }
 const communityRoute=require('./community.cjs')({db,now,session,adminSession,fail,json});
+const workRecordsRoute=require('./work-records.cjs')({db,now,session,adminSession,fail,json});
+const testerFileRoute=require('./tester-file-firebase.cjs')({db,bucket,now,session,adminSession,fail,json});
+const testerPublishRoute=require('./tester-publish-firebase.cjs')({db,now,session,adminSession,
+ fail,json,prepareFile:testerFileRoute});
+const testerRoomRoute=require('./test-room-firebase.cjs')({db,bucket,now,session,adminSession,fail,json});
 const runDiagnostics=require('./commerce-diagnostics.cjs')({
  db,bucket,ref,collections,now,adminSession,active,
  checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
@@ -594,6 +599,13 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   if(resource==='status')return await statusRoute(req,res);
   if(resource==='health')return await healthRoute(req,res);
   if(resource==='cutover')return await cutoverRoute(req,res);
+  // Non-commerce features must work regardless of the purchasing switch.
+  // Each service verifies its own Firebase ID token and user/role permissions.
+  if(resource==='workRecords')return await workRecordsRoute(req,res);
+  if(resource==='testerFile')return await testerFileRoute(req,res);
+  if(resource==='testerPublish')return await testerPublishRoute(req,res);
+  if(resource==='testRoom')return await testerRoomRoute(req,res);
+  if(resource==='community')return await communityRoute(req,res);
   // Staged requests are allowed only for authenticated administrators.
   if(!await active()){
    const staging=req.headers['x-moakit-staging']==='1';
@@ -604,7 +616,6 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   if(resource==='orders')return await ordersRoute(req,res);
   if(resource==='pattern')return await patternRoute(req,res);
   if(resource==='finance')return await financeRoute(req,res);
-  if(resource==='community')return await communityRoute(req,res);
   if(resource==='diagnostics')return await runDiagnostics(req,res);
   throw fail('요청한 기능을 찾지 못했습니다.',404);
  }catch(e){
