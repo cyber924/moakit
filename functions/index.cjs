@@ -75,6 +75,7 @@ async function statusRoute(req,res){
  const ready=migration.data()||{};
  json(res,{active:enabled,mode:enabled?'firebase':'legacy',engine:'firebase-functions-v2',
   services:{records:true,testerFile:true,testerPublish:true,
+   catalog:ready.catalogReady===true,
    testRoom:ready.testRoomReady===true,community:ready.communityReady===true}});
 
 }
