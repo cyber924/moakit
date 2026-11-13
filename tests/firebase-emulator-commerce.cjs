@@ -168,9 +168,16 @@ async function run(){
   applicantUid:buyer.uid,sellerUid:seller.uid,callId,status:'confirmed',createdAt:date(-9),
   updatedAt:date(-8),yarnId:'',yarnColor:'',content:'{}',feedback:''
  });
+ // An existing Work encrypted grant must survive the Firebase PDF copy.
+ await db.doc('moakitTesterCalls/'+callId+'/private/file').set({
+  blob:'legacy-encrypted-grant-do-not-overwrite',expiresAt:date(30),createdAt:date(-5)
+ });
  const draftGrant=await api('testerFile','prepare',{callId},seller.token);
  // testerFile resource prepares from its method, not action name.
  assert.equal(draftGrant.status,200,JSON.stringify(draftGrant.data));
+ assert.equal((await db.doc('moakitTesterCalls/'+callId+'/private/file').get()).data().blob,
+  'legacy-encrypted-grant-do-not-overwrite');
+ assert.equal((await db.doc('moakitTesterCalls/'+callId+'/private/firebaseFile').get()).exists,true);
  const published=await api('testerPublish','publish',{callId},seller.token);
  assert.equal(published.status,200,JSON.stringify(published.data));
  assert.equal(published.data.status,'recruiting');
