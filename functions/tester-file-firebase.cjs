@@ -86,6 +86,8 @@ module.exports=function createTesterFile({db,bucket,session,adminSession,now,fai
   });
  }
  testerFileRoute.ensure=ensure;
+ testerFileRoute.checkStorage=async(path)=>typeof path==='string'&&
+  path.startsWith('moakit/private/')&&(await bucket.file(path).exists())[0];
  testerFileRoute.refreshExpiry=async(callId,call)=>{
   const record=await ensure(callId,call);
   const expiresAt=new Date(Date.parse(call.testEnd)+7*86400000).toISOString();
