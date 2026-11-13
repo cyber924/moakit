@@ -60,22 +60,24 @@ test('phase 2: preserve seven Firebase read actions, expand only known writes',(
  assert.equal(isFirebaseAdminReadAction('updateMember'),false);
  for(const name of ['updateMember','updateTesterContent','updatePattern','createAdministrator','setAdministrator'])
   assert.equal(isFirebaseAdminLocalAction(name),true);
- for(const name of ['deletePattern','exportSales','suggestPattern'])
-  assert.equal(isFirebaseAdminLocalAction(name),false);
+ for(const name of ['deletePattern','suggestPattern','patternDetail','patterns','recommendPatternFields'])
+  assert.equal(isFirebaseAdminLocalAction(name),true);
+ assert.equal(isFirebaseAdminLocalAction('exportSales'),false);
  const p=readFileSync(new URL('../public/admin.js',import.meta.url),'utf8');
  assert.match(p,/isFirebaseAdminLocalAction\(action\)/);
  const route=readFileSync(new URL('../app/api/admin/route.ts',import.meta.url),'utf8');
  assert.match(route,/isFirebaseAdminLocalAction\(action\)/);
 });
-test('phase 3: tester edits route to Firebase, new publication grants remain on Work',()=>{
+test('phase 3: Firebase tester publication and PDF grants are readiness-gated; previous Work content remains available',()=>{
  const url='https://moakit.co.kr/api/tester/publish';
- const local=backendRoute(new Request(url,{method:'POST',headers:{'x-moakit-tester-local':'1'}}));
+ const local=backendRoute(new Request(url,{method:'POST',headers:{'x-moakit-firebase-feature':'1'}}));
  const old=backendRoute(new Request(url,{method:'POST'}));
  assert.equal(local.local,true);assert.match(old.target,/herestay/);
  const code=readFileSync(new URL('../app/api/tester/publish/route.ts',import.meta.url),'utf8');
- assert.match(code,/body\?\.action!=='edit'/);
+ assert.match(code,/proxyFirebaseCommerce\(request,'testerPublish'/);
  const client=readFileSync(new URL('../public/tester-client.js',import.meta.url),'utf8');
- assert.match(client,/options.action==='edit'/);
+ assert.match(client,/firebaseServiceReady\('testerPublish'\)/);
+ assert.match(client,/firebaseServiceReady\('testerFile'\)/);
 });
 test('phase 4: read-only work migration audit compares IDs and excludes shipping details',()=>{
  const kit={id:'oldkit',buyerUid:'buyer01',total:15000,mode:'test',
