@@ -60,6 +60,64 @@ async function run(){
  const admin=await signup('cyber924@naver.com'),buyer=await signup('customer1@example.com'),
    buyer2=await signup('customer2@example.com'),seller=await signup('artist1@example.com');
  await db.doc('moakitSettings/commerce').set({firebaseEnabled:true,schemaVersion:1});
+ // Work-free notices and support: private Firebase documents, no D1 seed.
+ const comm=async(resource,action,data={},token='',isAdmin=false)=>{
+  const request=await fetch(host+resource+(isAdmin?'&admin=1':''),{
+   method:action?'POST':'GET',
+   headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+   ...(action?{body:JSON.stringify({action,...data})}:{})});
+  return {status:request.status,data:await request.json()};
+ };
+ const blankNotice=await comm('notifications',null,{},admin.token,true);
+ assert.equal(blankNotice.status,200);
+ assert.deepEqual(blankNotice.data.notices,[],'deleted Work test notices must never auto-seed in Firebase');
+ const notice={title:'공지 테스트',body:'Firebase 직접 저장 공지',category:'notice',
+  audience:'all',recipientUid:'',status:'published',href:'#patterns',startsAt:'',endsAt:''};
+ const savedNotice=await comm('notifications','save',{notice},admin.token,true);
+ assert.equal(savedNotice.status,200,JSON.stringify(savedNotice.data));
+ assert.equal(savedNotice.data.notice.version,1);
+ const noticeId='notice-'+savedNotice.data.notice.id;
+ const buyerList=await comm('notifications',null,{},buyer.token);
+ assert.equal(buyerList.status,200,JSON.stringify(buyerList.data));
+ assert.equal(buyerList.data.items.filter(i=>i.id===noticeId).length,1);
+ const read=await comm('notifications','read',{ids:[noticeId]},buyer.token);
+ assert.equal(read.status,200);
+ const afterRead=await comm('notifications',null,{},buyer.token);
+ assert.equal(afterRead.data.items.find(i=>i.id===noticeId).read,true);
+ const otherRead=await comm('notifications',null,{},buyer2.token);
+ assert.equal(otherRead.data.items.find(i=>i.id===noticeId).read,false);
+ const deleteNotice=await comm('notifications','delete',
+  {id:savedNotice.data.notice.id,version:1},admin.token,true);
+ assert.equal(deleteNotice.status,200,JSON.stringify(deleteNotice.data));
+ const afterDelete=await comm('notifications',null,{},buyer.token);
+ assert.equal(afterDelete.data.items.filter(i=>i.id===noticeId).length,0,
+  'deleted announcements stay deleted; there is no default notice seed');
+ const ticketId='test-support-'+uuid();
+ const ticket={kind:'report',title:'테스트룸 게시글 신고',body:'게시글 상태 확인을 요청합니다.',
+  relatedHref:'#test-room/call-id'};
+ const newTicket=await comm('support','create',{id:ticketId,ticket,attachments:[]},buyer.token);
+ assert.equal(newTicket.status,201,JSON.stringify(newTicket.data));
+ assert.equal(newTicket.data.ticket.ownerUid,buyer.uid);
+ const retried=await comm('support','create',{id:ticketId,ticket,attachments:[]},buyer.token);
+ assert.equal(retried.status,200,JSON.stringify(retried.data));
+ assert.equal(retried.data.reused,true,'duplicate submissions must not duplicate support tickets');
+ const wrong=await fetch(host+'support&id='+ticketId,{headers:{Authorization:'Bearer '+buyer2.token}});
+ assert.equal(wrong.status,404,'members cannot inspect other users reports');
+ const denied=await comm('support','update',{id:ticketId,version:1,status:'answered',
+  reply:'answer'},buyer.token,true);
+ assert.equal(denied.status,403);
+ const reply=await comm('support','update',{id:ticketId,version:1,status:'answered',
+  reply:'신고 내용을 확인했습니다.',internalNote:'관리자 전용 메모',assignee:'운영자'},admin.token,true);
+ assert.equal(reply.status,200,JSON.stringify(reply.data));
+ const ownTicket=await fetch(host+'support&id='+ticketId,{headers:{Authorization:'Bearer '+buyer.token}});
+ const own=await ownTicket.json();
+ assert.equal(ownTicket.status,200,JSON.stringify(own));
+ assert.equal(own.ticket.reply,'신고 내용을 확인했습니다.');
+ assert.equal(Object.hasOwn(own.ticket,'internalNote'),false);
+ assert.ok(!JSON.stringify(own).includes('관리자 전용 메모'),'internal notes remain private');
+ const memberNotifications=await comm('notifications',null,{},buyer.token);
+ assert.ok(memberNotifications.data.items.some(i=>i.source==='support'&&i.href==='#my/support/'+ticketId));
+
  const state=await api('status');assert.equal(state.status,200);assert.equal(state.data.active,true);
  const healthR=await fetch(host+'health',{headers:{Authorization:'Bearer '+admin.token}});
  const health=await healthR.json();assert.equal(healthR.status,200,JSON.stringify(health));
