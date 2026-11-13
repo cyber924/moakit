@@ -1,58 +1,53 @@
-# MOAKIT · Work 서버 독립화 1~4단계 개발 현황
+# MOAKIT Work 독립화 4개 영역 · 통합 개발 (2026-11-13)
 
-기준: 2026-11-13
-코드 작업 브랜치: `work-firebase-migration-steps-1-4-20261113`
+## 핵심
+- 개발 브랜치: `work-firebase-migration-steps-1-4-20261113` / PR #8.
+- **4개 영역의 Firebase 대체 코드는 작성됨. 실제 Work 서버 0건을 아직 인증하지 않았으며, 기능별 이전·배포 승인 상태는 서로 다름.**
+- 운영 `moakit.co.kr`과 결제 테스트·과거 원본 Work D1/R2 및 Firestore 문서는 검증 없이 삭제·변경하지 않음.
+- 새로운 Firebase Functions는 별도 배포 대상: Vercel READY만으로 Functions가 활성화되지 않음.
 
-## 기존 운영 구매는 보호
-- **Firebase 신규 주문, KIT 배송, 구매 PDF 다운로드**: 기존 운영 방식 유지. Firestore `moakitOrders`, `moakitOrderPrivate`, `moakitSales`, Storage 버킷 유지.
-- **기존 Work D1/R2** 데이터 삭제/갱신하지 않음. `BACKEND_ORIGIN` 프록시를 제거하지 않음.
-- 운영 코드에 병합하기 전에 Firebase Emulator의 작가 발행→구매자 다운로드 E2E 및 Vercel Preview 통과 필요.
+## 1. 작가 도안 등록·수정·등록기록
+- 작가 작품 원본: `moakitUsers/{uid}/works/{workId}` Firestore atomic :commit.
+- 공개 도안: `moakitPatterns/{uid}_{workId}`; PDF·이미지는 Firebase Storage.
+- 변경시 다른 기기 버전 충돌/관리자 판매중지/기존 추천 노출·과거 PDF 구매 권한 유지.
+- 새 등록기록: Firebase Functions `resource=workRecords` → `moakitWorkRecords`, `moakitWorkRecordState`; 기록 당시 정보·해시·순번 보존, PDF 확인서 제공.
+- 옛 Work 등록기록·PDF 확인서는 읽기 전용으로 별도 조회 가능. 자동으로 과거 기록이 새 컬렉션에 복제되지는 않음.
+- Functions 상태 `services.records=true`일 때 새 저장 경로 활성화, 이전에는 Work 기존 경로 유지.
 
-## 1. 도안 등록·수정
-구현:
-- `public/firebase-pattern-save.mjs`: 판매자 ID 토큰으로 Firestore 직접 접근, 원본 작품 및 공개 `moakitPatterns`를 `:commit`으로 함께 저장; 버전 불일치 시 중지, 관리자가 판매 중지한 상품의 덮어쓰기 차단.
-- `public/seller-client.js`: 사진 직접 Firebase Storage 압축/업로드, PDF 미리보기 직접 Firebase Storage, 저장 시 Firebase 호출.
-- `public/firebase-pattern-catalog.mjs`, `public/patterns.js`: 공개 도안 목록을 Firebase에서 직접 가져와 최신 공개 도안 노출; 오래된 Work 상품 추천/샘플 표시 정보는 병합으로 보존.
-보류:
-- **등록기록·확인서**가 현재 Work D1/R2에 존재하며 최신 Firebase 변경기록으로 재발급되지 않음. Work 인증서/기록 서비스 제거 금지.
-- 실제 작가 계정으로 새 도안 등록, 공개 정보 수정, PDF 업로드/다운로드, 이미지 갤러리 확인 필요.
-- PDF를 구매한 과거 권리자의 Work 다운로드는 과거 데이터 이관 전 유지.
+## 2. 이미지·공개 목록·관리자 추천
+- 이미지·PDF Storage 직접 업로드.
+- 공개 목록·인기·추천·이주의 베스트·노출 순서 관리: Firestore public listing 기반 Vercel API.
+- Work D1의 현재 노출 설정은 자동 삭제/추측하지 않음.
+- 관리자 'Work 추천·노출 설정 이전 점검' → 누락 0 확인 → 'Firebase 이전 확정' 2단계.
+- Function이 `moakitSettings/workIndependence.catalogReady=true`로 검증해 표시하기 전까지, 기존 목록·추천은 Work API 유지.
+- 상태가 true면 `/api/pattern-catalog`, `/api/pattern-admin`은 Firebase API로 전환.
 
-## 2. 관리자 수정
-구현:
-- 관리자 `updateMember`, `updateTesterContent`, `createAdministrator`, `setAdministrator`, `updatePattern` 요청을 검증된 Firebase 로컬 API로 연결.
-- 기존 관리자 Firestore 읽기 액션 7개 유지.
-- 도안 수정은 Firestore에 낙관적 동시성 제어로 저장.
-보류:
-- `deletePattern`은 등록기록 보존 때문에 Work 경로 유지.
-- 전체 도안 관리 카탈로그 추천/순위는 아직 Work D1.
-- 관리자 변경 이력(등록기록 기반)은 Firebase 신규 도안 기록 시스템으로 이동 전까지 모두 전환했다고 표시하지 않음.
+## 3. 관리자 기능
+- 회원/관리자 권한·작가 승인·도안 상세·작품 수정·도안 판매중지·AI 추천·테스터 콘텐츠 관리: Vercel `/api/admin` + Firestore, Gemini 서버 키.
+- 추천 순위/노출 전환은 위의 D1 원본 정합성 점검 후 Firebase로 적용.
+- 실제 구매자의 기존 PDF 구매·주문 권리 데이터는 건드리지 않음.
 
-## 3. 테스터콜·커뮤니티
-구현:
-- 이미 공개된 테스터콜의 `edit` 요청은 Vercel Firebase Firestore API에서 실행.
-- 새로운 Firestore 커뮤니티 게시판(질문·답변·테스터 후기) 서버 코드를 Firebase Functions에 추가. `/api/community-firebase` 별도 준비 경로.
-보류:
-- **테스터콜 최초 공개**는 Work의 PDF 제공 권한/전용 기록과 관련되어 있어 원 경로 유지.
-- **이미 지원자가 있는 공고** 또는 **테스트 종료일 변경**은 Work 알림·PDF 만료일 갱신이 필요하므로 기존 서버로 처리. 지원자 조회에 실패해도 Work로 처리.
-- **기존 Q&A·후기**는 Work D1에 저장돼 있으므로 Firebase 게시판으로 교체하지 않음. 글 ID, 작성자, 시간, 수정권한 이관·검증 후 전환 필요.
-- Firebase Functions 소스 변경은 현재 브랜치에만 반영. 운영 Cloud Functions 배포는 별도이므로 새 게시판이 즉시 작동한다고 주장하면 안 됨.
+## 4. 테스터콜·테스트룸·후기
+- Firebase Functions에 새 `testerFile`, `testerPublish`, `testRoom`, `community` 구현.
+- PDF 제공: Firebase Storage의 원본에서 별도 **비공개 동결 사본**을 만들고, 선정된 테스터와 판매자/관리자 ID 토큰 검증 뒤 스트리밍.
+- 비공개 테스터 PDF 권한 `private/firebaseFile`은 과거 Work의 `private/file` 암호화 자료와 별도로 유지. **기존 Work grant 덮어쓰기 금지.**
+- 모집 승인·수정은 Firestore 기반, 새 알림 `moakitInbox`; 현재 Work 알림·기존 수신함의 이전 검증이 필요.
+- 테스트룸 게시물·댓글·답변·사진·PDF 수정본은 Firestore 하위컬렉션 + Firebase Storage 사본에 저장.
+- 커뮤니티 Q&A·테스터 후기도 Functions/Firestore 구현.
+- **기존 Work D1 커뮤니티·테스트룸 게시글/댓글/수정본 PDF는 아직 새 Firebase 컬렉션으로 실제 이전하지 못했으므로** `testRoomReady`, `communityReady` 기본 false → 화면은 Work를 계속 사용.
+- 기존 테스터 PDF는 관리자 고급 운영 설정의 읽기 전용 점검 및 사본 이전 버튼으로 파일 존재 검증 후에만 `testerFileReady=true`. `testerPublishReady`는 수신 알림 이전 전까지 기본 false.
 
-## 4. 기존 Work 구매 이력 이전
-구현:
-- 관리자 Firebase 통합에 'Work 구매 이력 누락 점검 (읽기 전용)' 버튼 추가.
-- 기존 Firestore `users/{uid}.moakitPurchases`, 기존 Work KIT 주문을 페이지 단위로 읽어서 Firestore 주문과 ID/구매자/종류/상품/금액 대조.
-- 과거 KIT 요청은 활성 Firebase 라우팅을 혼동하지 않도록 `X-MOAKIT-LEGACY-VIEW` 명시.
-- 기존 '기존 주문 전체 Firebase 이전' 메뉴 및 중복방지 로직 유지.
-보류:
-- 실제 Work 원본 주문을 사용자 권한으로 읽고 이관한 적이 없다면 완료로 표시하지 않음.
-- 옛 도안 PDF 구매 권한, 원본 Storage 경로, KIT 배송주소, 환불/정산 상태는 주문문서 비교 외 추가 검증 필요.
-- **Work 서버 전체 종료 금지.**
+## 배포 및 검증 순서
+1. GitHub Actions Node22, Next.js 빌드, Firebase Emulator(Auth/Firestore/Storage/Functions) 통과 확인.
+2. GitHub PR #8의 Vercel 미리보기 READY 확인. 운영 배포는 이전 검증을 통과한 코드만.
+3. 새 Firebase Functions를 프로젝트 `studio-1613487721-b043c`에 별도로 배포.
+4. 관리자에서 원본 추천·노출설정, 테스터 PDF 사본 이전 점검·실행. 누락/오류가 있으면 해당 기능 Work 유지.
+5. 이전된 역할별 실제 계정 점검: 작가 도안 등록/수정, 판매자·관리자 조회/수정, 테스터 공개/지원/댓글/PDF, 기존 구매자 다운로드.
+6. 기존 Q&A·테스터룸/알림/등록이력의 **Work 원본 복사·건수·작성자 권한 정합성** 점검. 실제 이전 완료 전에는 활성화 플래그를 true로 변경하지 않음.
+7. 모든 테스트가 통과한 뒤에만 Work 프록시 최종 제거. 그 전 Work 서버 종료 금지.
 
-## 완료 판정 조건
-- CI Node 22/Next.js 빌드/에뮬레이터 E2E 통과
-- 판매자 실제 계정 1건 도안 생성·수정·구매자 테스트
-- 관리자 기존 도안 수정 및 역할 변경 점검
-- 테스터콜 수정 후 모집 일정 반영 확인, 오래된 모집/후기 그대로 표시
-- 과거 Work 주문 전체 원본/Firestore 대조 및 기존 배송/다운로드 검증
-- 배포 후 Vercel READY/도메인/서버 오류 확인
+## 안전 판단
+- Firebase Emulator 테스트는 실제 운영 Firestore 데이터가 이전됐음을 증명하지 않음.
+- 브라우저의 Firebase 연결 상태등 녹색은 전체 Work 독립화 완료와 다름.
+- 실제 카드 결제는 없음. 테스트 주문 `charged=0`.
+- 기존 Work 등록기록/커뮤니티 게시글/테스트룸 첨부파일을 이전·검증할 방법이 없는 경우에는 **완전 독립화 미완료**로 표시하고 역사 기록 경로를 보존한다.
