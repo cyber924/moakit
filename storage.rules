@@ -1,49 +1,40 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    function signedIn() { return request.auth != null; }
-    function owner(uid) { return signedIn() && request.auth.uid == uid; }
-    // Administrator: designated Firebase Authentication email.
-    // No Firestore lookup: prevents cross-service IAM permissions.
-    // The primary administrator is authenticated by Firebase Authentication email.
-    // Other administrators may use an explicitly issued Firebase Auth custom claim.
+    function owner(uid) { return request.auth != null && request.auth.uid == uid; }
     function admin() {
-      return signedIn() && (
-        request.auth.token.get('email', '') == 'cyber924@naver.com'
-        || request.auth.token.get('moakitStorageAdmin', false) == true
-      );
+      return request.auth != null && (request.auth.token.get('email', '') == 'cyber924@naver.com'
+        || request.auth.token.get('moakitStorageAdmin', false) == true);
     }
     function validSize() { return request.resource.size > 0 && request.resource.size <= 10 * 1024 * 1024; }
+
     match /moakit/public/{uid}/{workId}/{fileName} {
       allow get: if true;
-      allow list: if owner(uid) || admin();
+      allow list, delete: if owner(uid) || admin();
       allow create, update: if (owner(uid) || admin()) && validSize()
-        && request.resource.contentType in ['image/jpeg','image/png','image/webp'];
-      allow delete: if owner(uid) || admin();
+        && request.resource.contentType in ['image/jpeg', 'image/png', 'image/webp'];
     }
     match /moakit/private/{uid}/{workId}/{fileName} {
-      allow get, list: if owner(uid) || admin();
+      allow get, list, delete: if owner(uid) || admin();
       allow create, update: if (owner(uid) || admin()) && validSize()
-        && request.resource.contentType == 'application/pdf'
-        && fileName.matches('.*[.][pP][dD][fF]');
-      allow delete: if owner(uid) || admin();
+        && request.resource.contentType == 'application/pdf' && fileName.matches('.*[.][pP][dD][fF]');
     }
-    // Public copies of existing D1 images, creatable only by an administrator.
+    match /moakit/record-files/{uid}/{workId}/{fileName} {
+      allow get, list: if owner(uid) || admin();
+      allow create: if owner(uid) && resource == null && validSize()
+        && request.resource.contentType == 'application/pdf' && fileName.matches('[a-f0-9]{64}[.]pdf');
+      allow update, delete: if false;
+    }
     match /moakit/images/shared/{fileName} {
       allow get: if true;
       allow list: if admin();
-      allow create: if admin()
-        && fileName.matches('[A-Za-z0-9_-]{1,160}[.](webp|jpg|png)')
-        && request.resource.size > 0
-        && request.resource.size < 200000
-        && (
-          (fileName.matches('.*[.]webp') && request.resource.contentType == 'image/webp')
+      allow create: if admin() && fileName.matches('[A-Za-z0-9_-]{1,160}[.](webp|jpg|png)')
+        && request.resource.size > 0 && request.resource.size < 200000
+        && ((fileName.matches('.*[.]webp') && request.resource.contentType == 'image/webp')
           || (fileName.matches('.*[.]jpg') && request.resource.contentType == 'image/jpeg')
-          || (fileName.matches('.*[.]png') && request.resource.contentType == 'image/png')
-        );
+          || (fileName.matches('.*[.]png') && request.resource.contentType == 'image/png'));
       allow update, delete: if false;
     }
-
     match /{allPaths=**} { allow read, write: if false; }
   }
 }

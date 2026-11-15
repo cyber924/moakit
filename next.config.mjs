@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const config = {
   poweredByHeader: false,
-  outputFileTracingIncludes: { '/': ['./src/site.html'], '/api/work-records-firebase': ['./public/fonts/record-korean.ttf'] },
+  outputFileTracingIncludes: { '/': ['./src/site.html'], '/api/work-records-firebase': ['./public/fonts/record-korean.ttf'], '/api/firebase-record-receipt': ['./public/fonts/record-korean.ttf'] },
   experimental: { proxyClientMaxBodySize: '12mb' },
   async headers() {
     return [{ source: '/:path*', headers: [

@@ -1,3 +1,4 @@
+import {prepareRecordWrites} from './firebase-work-records.mjs';
 import {encodeFields,decodeDocument} from './member-core.mjs';
 import {toRecord} from './seller-core.mjs';
 import {fillRequiredPattern} from './pattern-required.mjs';
@@ -55,7 +56,7 @@ export function draftWrites(copy,sourceDoc=null,listingDoc=null){
   currentDocument:listingDoc?{updateTime:listingDoc.updateTime}:{exists:false}});
  return writes;
 }
-export async function savePatternToFirebase(F,d,{fetcher=fetch}={}){
+export async function savePatternToFirebase(F,d,{fetcher=fetch,record=false,reason=''}={}){
  const uid=F?.user?.uid;
  if(!uid||uid!==d?.sellerUid)throw error('본인 도안만 저장할 수 있습니다.',403);
  const token=await F.user.getIdToken();
@@ -97,6 +98,7 @@ export async function savePatternToFirebase(F,d,{fetcher=fetch}={}){
  }
  if(uid!==F.user?.uid)throw error('로그인 계정이 변경됐습니다.',401);
  const writes=draftWrites(draft,source,listing);
+ if(record)writes.push(...await prepareRecordWrites(F.user,draft,source,{reason,fetcher}));
  await fireRequest(':commit',token,{method:'POST',body:{writes},fetcher});
  return draft.updatedAt;
 }
