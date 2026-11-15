@@ -26,7 +26,9 @@ export async function listFirebaseRecords(user,uid,workId,{fetcher=fetch}={}){
 }
 export async function prepareRecordWrites(user,draft,source,{reason='',fetcher=fetch}={}){
  const uid=user?.uid,workId=draft.id;checked(uid,workId);if(uid!==draft.sellerUid)throw Error('본인의 등록기록만 만들 수 있습니다.');
- const token=await user.getIdToken(),path=basePath(uid,workId),stateDoc=await call(path+'/recordState/current',token,{fetcher,missing:true});
+ const token=await user.getIdToken(),path=basePath(uid,workId);
+ const network=fetcher; fetcher=async (url,options)=>{try{return await network(url,options);}catch(e){const stage=String(url).includes('firebasestorage.googleapis.com')?(String(url).includes('record-files')?'PDF 보관본':'PDF 원본'):'등록기록 조회';throw new Error(stage+' 연결 실패: '+(e.name==='TimeoutError'?'시간 초과':'네트워크 오류'));}};
+ const stateDoc=await call(path+'/recordState/current',token,{fetcher,missing:true});
  const state=stateDoc?decodeDocument(stateDoc):null;
  const previous=state?.latestId?view(await call(path+'/records/'+state.latestId,token,{fetcher})):null;
  let file=null;
