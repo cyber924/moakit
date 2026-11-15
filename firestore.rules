@@ -175,7 +175,7 @@ request.resource.data.storagePath.matches('.*[.]jpg')) || (request.resource.data
 request.resource.data.byteSize is int && request.resource.data.byteSize > 0 && request.resource.data.byteSize < 200000 && request.resource.data.sha256 is string &&
 request.resource.data.sha256.matches('[a-f0-9]{64}') && request.resource.data.originalCreatedAt is string && request.resource.data.originalCreatedAt.size() <= 60 &&
 request.resource.data.copiedAt is string && request.resource.data.copiedAt.size() <= 60 && request.resource.data.source == 'd1-shared-banner' && request.resource.data.status
-== 'ready'; allow update, delete: if false; } match /moakitKits/{kitId} { function validKitCopy() { let d = request.resource.data; return kitId.matches('[A-Za-z0-9_-]{1,100}')
+== 'ready'; allow update: if false; allow delete: if admin(); } match /moakitKits/{kitId} { function validKitCopy() { let d = request.resource.data; return kitId.matches('[A-Za-z0-9_-]{1,100}')
 && d.keys().hasAll([ 'id','status','stock','version','price','shippingFee', 'createdAt','updatedAt','dataJson','source','syncedAt' ]) && d.keys().hasOnly([
 'id','status','stock','version','price','shippingFee', 'createdAt','updatedAt','dataJson','source','syncedAt' ]) && d.id == kitId && d.status in
 ['published','draft','suspended','deleted'] && d.stock is int && d.stock >= 0 && d.stock <= 100000 && d.version is int && d.version >= 1 && d.price is int && d.price >= 0 &&

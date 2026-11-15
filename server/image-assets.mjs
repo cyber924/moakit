@@ -33,7 +33,7 @@ export function storageRow(item,description){
   bytes,byteSize:bytes,createdAt:item.timeCreated||item.updated||meta?.createdAt||'',
   copiedAt:item.updated||'',usage:meta?.usage||'unknown',
   refs:[sample?'KIT 샘플 원본':asset?'사이트 정적 원본':'Firebase 공용 이미지',path],
-  originalName:sample||asset||'',readonly:true,private:false,status:'ready',
+  originalName:sample||asset||'',readonly:false,private:false,status:'ready',
   // Only Firestore-recorded original D1 images can be selected in legacy promotions.
   compatibleUrl:meta?'/api/promotions?image='+encodeURIComponent(id):null,
   selectableForPromotion:!!meta,
@@ -85,7 +85,7 @@ function photoRow(path,title,docId,index,updatedAt){
  return {id:docId+'-'+index,key:'firebase:'+path,title:title+' · '+(index+1)+'번 사진',
   url,firebaseUrl:url,storagePath:path,path,kind:'pattern',source:'firebase-public',
   bytes:0,byteSize:0,createdAt:updatedAt,copiedAt:'',usage:'current',
-  refs:['공개 도안 · '+title,path],private:false,readonly:true,status:'ready',
+  refs:['공개 도안 · '+title,path],private:false,readonly:false,status:'ready',
   compatibleUrl:null,selectableForPromotion:false};
 }
 async function getPublishedPhotos(fetcher,token){
@@ -115,6 +115,15 @@ async function getPublishedPhotos(fetcher,token){
  return [...rows.values()];
 }
 
+async function kitReferences(fetcher,token){
+ const refs=new Map();let cursor='',rounds=0;
+ do{const u=new URL(FIRESTORE+'/moakitKits');u.searchParams.set('pageSize','100');if(cursor)u.searchParams.set('pageToken',cursor);
+  const data=await getJson(fetcher,u.toString(),'Bearer '+token,'키트 이미지 사용처 조회');
+  for(const doc of data.documents||[]){let kit;try{kit=JSON.parse(String(read(doc.fields,'dataJson')||'{}'));}catch{continue;}
+   for(const image of [...(kit.images||[]),...(kit.detailImages||[])]){try{const parsed=new URL(image);if(parsed.origin!=='https://firebasestorage.googleapis.com')continue;const path=decodeURIComponent(parsed.pathname.split('/o/')[1]||'');if(PATH.test(path)||PUBLIC_PATH.test(path)){const names=refs.get(path)||[];names.push('KIT · '+String(kit.title||'이름 없음').slice(0,100));refs.set(path,names);}}catch{}}
+  }const next=String(data.nextPageToken||'');if(next&&next===cursor)throw kitFail('키트 목록 커서가 반복됩니다.',502);cursor=next;if(++rounds>=50&&cursor)throw kitFail('키트 사용처가 너무 많아 전부 확인하지 못했습니다.',502);
+ }while(cursor);return refs;
+}
 async function getDescriptions(fetcher,token){
  const map=new Map();let cursor='',rounds=0;
  do{
@@ -131,10 +140,23 @@ async function getDescriptions(fetcher,token){
 }
 export async function imageAssetsApi(request,fetcher=fetch){
  try{
-  if(request.method!=='GET')throw kitFail('GET 요청만 지원합니다.',405);
+  if(!['GET','POST'].includes(request.method))throw kitFail('지원하지 않는 요청입니다.',405);
   const user=await kitAuth(request,fetcher,true);
   if(user.email!==ADMIN_EMAIL)throw kitFail('관리자 계정으로 로그인해주세요.',403);
   const token=request.headers.get('authorization')?.slice(7)||'';
+  if(request.method==='POST'){
+   const body=await request.json();const paths=body.paths;
+   if(!Array.isArray(paths)||!paths.length||paths.length>24||new Set(paths).size!==paths.length||paths.some(p=>typeof p!=='string'||(!PATH.test(p)&&!PUBLIC_PATH.test(p))))throw kitFail('삭제할 이미지 경로를 확인해주세요.',400);
+   const failed=[],deleted=[];
+   for(const path of paths){
+    const response=await fetcher(STORAGE+'/'+encodeURIComponent(path),{method:'DELETE',headers:{Authorization:'Firebase '+token},signal:AbortSignal.timeout(25000)});
+    if(!response.ok&&response.status!==404){failed.push(path+' (Storage '+response.status+')');continue;}
+    const match=PATH.exec(path);
+    if(match){const meta=await fetcher(FIRESTORE+'/moakitImages/'+encodeURIComponent(match[1]),{method:'DELETE',headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(25000)});if(!meta.ok&&meta.status!==404){failed.push(path+' (등록정보 '+meta.status+')');continue;}}
+    deleted.push(path);
+   }
+   return kitJson({deleted,failed});
+  }
   const u=new URL(request.url);
   const page=Math.max(1,Math.min(10000,parseInt(u.searchParams.get('page')||'1',10)||1));
   const kind=String(u.searchParams.get('kind')||'').slice(0,24);
@@ -146,6 +168,9 @@ export async function imageAssetsApi(request,fetcher=fetch){
   const rows=catalogEntries(descriptions).map(x=>storageRow(x,descriptions)).filter(Boolean);
   try{rows.push(...await getPublishedPhotos(fetcher,token));}
   catch(e){warnings.push('공개 도안 이미지 일부를 확인하지 못했습니다.');}
+  try{const kitRefs=await kitReferences(fetcher,token);for(const row of rows){const refs=kitRefs.get(row.storagePath);if(refs?.length){row.refs.push(...refs);row.usage='current';}}}catch{warnings.push('KIT 사용처 전체를 확인하지 못했습니다. 삭제 전 직접 확인해주세요.');}
+  // Known static inventory may reference deleted Storage objects; hide only confirmed missing files.
+  const existing=[];for(let i=0;i<rows.length;i+=12){const batch=await Promise.all(rows.slice(i,i+12).map(async row=>{try{const r=await fetcher(STORAGE+'/'+encodeURIComponent(row.storagePath),{headers:{Authorization:'Firebase '+token},signal:AbortSignal.timeout(15000)});return r.status===404?null:row;}catch{return row;}}));existing.push(...batch.filter(Boolean));} rows.splice(0,rows.length,...existing);
   const onlyPromotion=u.searchParams.get('selectable')==='promotion';
   const filtered=rows.filter(row=>(!onlyPromotion||row.selectableForPromotion)&&
    (!kind||row.kind===kind||kind==='shared'&&row.source==='firebase')&&
