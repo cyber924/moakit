@@ -1,4 +1,5 @@
-import {compressBanner,promoRequest} from './promotions-client.js';
+import {compressBanner} from './promotions-client.js';
+import {uploadKitImageToFirebase} from './kit-firebase-upload.mjs';
 import {firebaseKitReadFallback} from './kit-firebase-catalog.mjs';
 import {commerceMode} from './commerce-switch.mjs';
 export const kitMoney=n=>Number(n).toLocaleString('ko-KR')+'원';
@@ -36,21 +37,15 @@ export async function kitRequest(path='',data=null,{auth=false,timeout=45000,leg
  }
  return d;
 }
-// New KIT images are normalized to the shared Firebase image library.
- // Preserve a D1 registration for existing KIT image validators until that backend migrates.
+// Upload directly to Firebase Storage; do not create a legacy image record.
 export async function uploadKitImage(file){
   const user=window.MoaAccount?.user,uid=user?.uid;
   if(!user)throw Error('관리자 로그인이 필요합니다.');
   if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10485760||!file.size)
     throw Error('JPG·PNG·WebP, 파일당 10MB 이하로 선택해주세요.');
-  const compressed=await compressBanner(file);
+  const compressed=await compressBanner(file,{maxBytes:500000});
   if(window.MoaAccount?.user?.uid!==uid)throw Error('관리자 로그인 계정이 변경됐습니다.');
-  const response=await promoRequest({},{
-    action:'saveImage',source:'upload',
-    title:file.name.slice(0,100),...compressed
-  },{admin:true,timeout:95000});
-  if(window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐습니다.');
-  if(!response.image?.id||!response.image?.firebaseStatus)
-    throw Error('Firebase 이미지 저장 검증이 완료되지 않았습니다.');
-  return '/api/promotions?image='+encodeURIComponent(response.image.id);
+  const blob=await (await fetch(compressed.dataUrl)).blob();
+  return uploadKitImageToFirebase(user,blob,{currentUser:()=>window.MoaAccount?.user});
 }
+
