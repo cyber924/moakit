@@ -14,3 +14,9 @@ test('AI generation rejects non-admin users and missing keys',async()=>{
  const noKey=await aiDraft(req({kind:'help',action:'fill'}),{fetcher:async()=>response({users:[{localId:'x',email:'cyber924@naver.com'}]}),env:{}});
  assert.equal(noKey.status,503);
 });
+test('KIT AI writes descriptions and recommends only available candidates',async()=>{
+ const fetcher=async url=>String(url).includes('identitytoolkit')?response({users:[{localId:'uid',email:'cyber924@naver.com'}]}):response({candidates:[{content:{parts:[{text:JSON.stringify({description:'재료 키트',shippingInfo:'발송 후 익일 배송',recommendations:[{id:'available',reason:'적합해요'},{id:'missing',reason:'없는 상품'}]})}]}}]});
+ const options={fetcher,env:{GEMINI_API_KEY:'test'}};
+ let r=await aiDraft(req({kind:'kit',action:'suggest',kit:{data:{title:'가디건'}}}),options);assert.equal(r.status,200);assert.equal((await r.json()).suggestion.description,'재료 키트');
+ r=await aiDraft(req({kind:'kit',action:'recommend',preferences:{level:3},candidates:[{id:'available'}]}),options);assert.equal(r.status,200);assert.deepEqual((await r.json()).recommendations,[{id:'available',reason:'적합해요'}]);
+});
