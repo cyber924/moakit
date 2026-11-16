@@ -77,7 +77,7 @@ async function statusRoute(req,res){
   services:{records:true,notifications:true,support:ready.supportReady===true,
    testerFile:ready.testerFileReady===true,
    testerPublish:ready.testerPublishReady===true,
-   catalog:ready.catalogReady===true,migration:true,
+   catalog:ready.catalogReady===true,migration:false,
    testRoom:ready.testRoomReady===true,community:ready.communityReady===true}});
 
 }
@@ -594,7 +594,6 @@ const testerFileRoute=require('./tester-file-firebase.cjs')({db,bucket,now,sessi
 const testerPublishRoute=require('./tester-publish-firebase.cjs')({db,now,session,adminSession,
  fail,json,prepareFile:testerFileRoute});
 const testerRoomRoute=require('./test-room-firebase.cjs')({db,bucket,now,session,adminSession,fail,json});
-const workMigrationRoute=require('./work-migration.cjs')({db,now,adminSession,fail,json,testerFile:testerFileRoute});
 const runDiagnostics=require('./commerce-diagnostics.cjs')({
  db,bucket,ref,collections,now,adminSession,active,
  checkoutKit,changeKit,buyPattern,downloadPattern,trustedPurchase,
@@ -616,7 +615,7 @@ exports.moakitCommerce=onRequest({region:'asia-northeast3',memory:'512MiB',timeo
   if(resource==='testerFile')return await testerFileRoute(req,res);
   if(resource==='testerPublish')return await testerPublishRoute(req,res);
   if(resource==='testRoom')return await testerRoomRoute(req,res);
-  if(resource==='workMigration')return await workMigrationRoute(req,res);
+  if(resource==='workMigration')return json(res,{error:'이전 Work 서버 데이터 이전 기능은 종료되었습니다.'},410);
   if(resource==='community')return await communityRoute(req,res);
   if(resource==='notifications')return await communications.notifications(req,res);
   if(resource==='support')return await communications.supportRoute(req,res);

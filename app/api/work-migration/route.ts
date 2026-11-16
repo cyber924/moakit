@@ -1,7 +1,6 @@
-import {proxyFirebaseCommerce} from '../../../lib/firebase-commerce-proxy';
+// Retired. Never forward a request to Work or Firebase migration handlers.
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
-export const maxDuration=60;
-export async function POST(request:Request){
- return proxyFirebaseCommerce(request,'workMigration',{requireActivation:false});
-}
+const retired=()=>Response.json({error:'이전 Work 서버 데이터 이전 기능은 종료되었습니다.'},{status:410,headers:{'Cache-Control':'no-store'}});
+export async function GET(){return retired();}
+export async function POST(){return retired();}
