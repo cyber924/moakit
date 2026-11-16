@@ -4,6 +4,10 @@ import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {certificatePdf} from './work-record-pdf.mjs';
 
+/**
+ * @param {object} record
+ * @param {{ verifyUrl?: string, thumbnail?: Uint8Array | null }} [options]
+ */
 export async function renderRegistrationReceipt(record,{verifyUrl,thumbnail=null}={}){
  const fontBytes=await readFile(join(process.cwd(),'public','fonts','record-korean.ttf'));
  const url=verifyUrl||'https://moakit.co.kr/#record-verify/f-'+encodeURIComponent(record.id||'');
