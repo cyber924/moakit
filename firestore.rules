@@ -212,6 +212,28 @@ d.version == 1 && d.history is list && d.history.size() == 0 && d.createdAt is s
 allow create: if signedIn() && newTicket(); allow update, delete: if admin(); } match /moakitSupportPrivate/{ticketId} { allow read, write: if admin(); } match
 /moakitNotificationReads/{uid}/items/{itemId} { allow read: if owner(uid); allow create, update: if owner(uid) && exactKeys(request.resource.data, ['readAt']) &&
 request.resource.data.readAt is string; allow delete: if owner(uid); } 
+
+  // Admin-managed public settings and editorial content. These collections
+  // were present in browser sources but missing from the deployed rules.
+  // Public queries explicitly filter status == 'published'; drafts remain private.
+  function validManagedContent() {
+    return request.resource.data.keys().hasAll(['status', 'payload'])
+      && request.resource.data.keys().hasOnly(['status', 'payload'])
+      && request.resource.data.status in ['draft', 'published', 'deleted']
+      && request.resource.data.payload is string
+      && request.resource.data.payload.size() <= 800000;
+  }
+  match /moakitPromotions/{contentId} {
+    allow get, list: if admin() || resource.data.status == 'published';
+    allow create, update: if admin() && validManagedContent();
+    allow delete: if false;
+  }
+  match /moakitAiContent/{contentId} {
+    allow get, list: if admin() || resource.data.status == 'published';
+    allow create, update: if admin() && validManagedContent();
+    allow delete: if false;
+  }
+
   // Private tester-room documents are accessed directly via Firestore, not Functions.
   function roomCall(callId) {
     return get(/databases/$(database)/documents/moakitTesterCalls/$(callId)).data;
