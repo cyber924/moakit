@@ -1,5 +1,6 @@
 import {compressPatternImage} from './pattern-image-compress.js';
 import {savePatternToFirebase} from './firebase-pattern-save.mjs';
+import {firestoreBrowserUrl} from './firebase-firestore-transport.mjs';
 import {listFirebaseRecords} from './firebase-work-records.mjs';
 import {listCalls} from './tester-client.js';
 import {publicRecord,listingId,mergePublishedInformation} from './market-core.mjs';
@@ -13,7 +14,7 @@ function abortError(){return new DOMException('작업을 중단했어요.','Abor
 export async function bounded(task,ms,message,signal){if(signal?.aborted)throw abortError();let timer,listener;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms);if(signal){listener=()=>reject(abortError());signal.addEventListener('abort',listener,{once:true});}});try{return await Promise.race([Promise.resolve().then(task),timeout]);}finally{clearTimeout(timer);if(listener)signal.removeEventListener('abort',listener);}}
 async function token(F,signal){return bounded(()=>{uid(F);return F.user.getIdToken();},15000,'로그인 확인 시간이 초과됐어요. 다시 로그인한 뒤 재시도해주세요.',signal);}
 function requestSignal(signal,ms){return signal?AbortSignal.any([signal,AbortSignal.timeout(ms)]):AbortSignal.timeout(ms);}
-async function req(F,path,init={}){const auth=await token(F);const response=await fetch(base+(path.startsWith(':')?'':'/')+path,{...init,headers:{Authorization:'Bearer '+auth,'Content-Type':'application/json',...init.headers},signal:AbortSignal.timeout(20000)});const result=await response.json().catch(()=>({}));if(!response.ok){if(response.status===403)throw Error('작품 저장 권한이 필요해요. 운영자가 Firestore 작품 규칙을 추가한 뒤 다시 저장해주세요.');throw Error(result.error?.message||'저장 서버에 연결하지 못했어요.');}return result;}
+async function req(F,path,init={}){const auth=await token(F);const response=await fetch(firestoreBrowserUrl(base+(path.startsWith(':')?'':'/')+path),{...init,headers:{Authorization:'Bearer '+auth,'Content-Type':'application/json',...init.headers},signal:AbortSignal.timeout(20000)});const result=await response.json().catch(()=>({}));if(!response.ok){if(response.status===403)throw Error('작품 저장 권한이 필요해요. 운영자가 Firestore 작품 규칙을 추가한 뒤 다시 저장해주세요.');throw Error(result.error?.message||'저장 서버에 연결하지 못했어요.');}return result;}
 export async function listDrafts(F){
  const mine=uid(F);let pageToken='',documents=[];do{const page=await req(F,`moakitUsers/${mine}/works?pageSize=100`+(pageToken?'&pageToken='+encodeURIComponent(pageToken):''));documents.push(...(page.documents||[]));pageToken=page.nextPageToken||'';}while(pageToken);
  const drafts=documents.map(doc=>fromRecord(doc.name.split('/').pop(),decodeDocument(doc))).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));

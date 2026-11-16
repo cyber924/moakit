@@ -1,4 +1,5 @@
 import {prepareRecordWrites} from './firebase-work-records.mjs';
+import {firestoreBrowserUrl} from './firebase-firestore-transport.mjs';
 import {encodeFields,decodeDocument} from './member-core.mjs';
 import {toRecord} from './seller-core.mjs';
 import {fillRequiredPattern} from './pattern-required.mjs';
@@ -12,10 +13,11 @@ const idOK=value=>typeof value==='string'&&/^[A-Za-z0-9-]{1,128}$/.test(value);
 const error=(message,status=400)=>Object.assign(Error(message),{status});
 
 async function fireRequest(path,token,{method='GET',body,fetcher=fetch,missing=false,hiddenAsMissing=false}={}){
- const response=await fetcher(REST+path,{
+ let response;
+ try{response=await fetcher(firestoreBrowserUrl(REST+path,fetcher),{
   method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
   ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(35000)
- });
+ });}catch(cause){throw error((path===':commit'?'최종 공개·등록기록 저장':'도안 정보 조회')+' 연결에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요. ('+String(cause?.message||cause)+')',503);}
  if(missing&&(response.status===404||hiddenAsMissing&&response.status===403))return null;
  const result=await response.json().catch(()=>({}));
  if(!response.ok)throw error(response.status===403?
