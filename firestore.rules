@@ -326,7 +326,7 @@ request.resource.data.readAt is string; allow delete: if owner(uid); }
       && request.resource.data.changes.size() <= 3000
       && request.resource.data.path is string
       && request.resource.data.path.matches('^moakit/private/' + roomCall(callId).sellerUid
-        + '/' + callId + '/[A-Za-z0-9-]+[.]pdf } }
+        + '/' + callId + '/[A-Za-z0-9-]+[.]pdf$'
 )
       && request.resource.data.byte_size is int
       && request.resource.data.byte_size > 0 && request.resource.data.byte_size <= 10485760;
