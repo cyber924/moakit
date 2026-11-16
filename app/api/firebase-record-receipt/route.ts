@@ -35,7 +35,36 @@ export async function GET(request:Request){
    kind:value('kind'),created_at:value('created_at'),actor_name:value('actor_name'),
    reason:value('reason'),digest:value('digest'),sequence:Number(f.sequence?.integerValue||0),
    snapshot:JSON.parse(value('snapshot'))};
-  const bytes=await renderRegistrationReceipt(record);
+  // Restore the original MOAKIT certificate: product image, QR verification,
+  // full Korean font and readable wrapped fields. Image is optional and cannot
+  // block PDF issuance when Firebase Storage is temporarily unavailable.
+  let thumbnail:Uint8Array|null=null;
+  const imagePath=record.snapshot?.images?.[0];
+  if(typeof imagePath==='string'){
+   const prefix='moakit/public/'+uid+'/'+workId+'/';
+   if(imagePath.startsWith(prefix)&&/^[A-Za-z0-9_-]+\.(?:webp|png|jpe?g)$/i.test(imagePath.slice(prefix.length))){
+    try{
+     const bucket='studio-1613487721-b043c.firebasestorage.app';
+     const imageUrl='https://firebasestorage.googleapis.com/v0/b/'+bucket+'/o/'+
+       encodeURIComponent(imagePath)+'?alt=media';
+     const photo=await fetch(imageUrl,{headers:{Authorization:'Firebase '+auth.slice(7)},
+       cache:'no-store',signal:AbortSignal.timeout(10000)});
+     if(photo.ok&&Number(photo.headers.get('content-length')||0)<=1000000){
+      const raw=new Uint8Array(await photo.arrayBuffer());
+      if(raw.length>0&&raw.length<=1000000){
+       const sharp=(await import('sharp')).default;
+       thumbnail=new Uint8Array(await sharp(raw,{limitInputPixels:12000000})
+        .resize(320,400,{fit:'inside',withoutEnlargement:true}).png().toBuffer());
+      }
+     }
+    }catch{
+     // Keep issuing the original certificate without a product photo.
+    }
+   }
+  }
+  const verifyUrl='https://moakit.co.kr/#record-verify/'+
+    (legacy?'':'f-')+encodeURIComponent(id);
+  const bytes=await renderRegistrationReceipt(record,{verifyUrl,thumbnail});
   return new Response(new Uint8Array(bytes).buffer as ArrayBuffer,{headers:{
    'Content-Type':'application/pdf',
    'Content-Disposition':'attachment; filename="MOAKIT-registration-record.pdf"',
