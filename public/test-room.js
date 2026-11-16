@@ -3,47 +3,12 @@ import {ROOM_KINDS} from './test-room-core.mjs';
 import {publicImage} from './seller-client.js';
 import {compressBanner} from './promotions-client.js';
 import * as API from './tester-client.js';
-import {firebaseServiceReady} from './work-independence-mode.mjs';
+import {directTestRoomRequest} from './test-room-firestore.mjs';
 const E=s=>window.MoaUI.escapeHtml(String(s??'')),root=document.createElement('main');root.id='test-room-root';root.className='test-room-page';root.hidden=true;document.querySelector('footer').before(root);
 let callId='',data=null,tab='talk',filter='all',posts=[],cursor='',busy=false,epoch=0;
 const auth=()=>({user:window.MoaAccount?.user});
 async function request(params={},body=null){
- const user=window.MoaAccount?.user,uid=user?.uid;
- if(!user)throw Error('로그인 후 테스트룸을 이용해주세요.');
- const ready=await firebaseServiceReady('testRoom'),fileUpload=body instanceof FormData;
- if(ready&&fileUpload){
-  const file=body.get('file'),sellerUid=data?.room?.sellerUid;
-  if(!sellerUid||typeof sellerUid!=='string'||!file||typeof file.arrayBuffer!=='function')
-   throw Error('작가와 수정본 PDF를 확인해주세요.');
-  if(file.size>10*1024*1024||!file.size||file.type!=='application/pdf')
-   throw Error('10MB 이하 PDF를 선택해주세요.');
-  const header=new TextDecoder().decode(await file.slice(0,5).arrayBuffer());
-  if(header!=='%PDF-')throw Error('실제 PDF 파일만 업로드할 수 있습니다.');
-  const path='moakit/private/'+sellerUid+'/'+callId+'/'+crypto.randomUUID()+'.pdf';
-  const storage=await fetch('https://firebasestorage.googleapis.com/v0/b/studio-1613487721-b043c.firebasestorage.app/o?uploadType=media&name='+encodeURIComponent(path),{
-   method:'POST',headers:{Authorization:'Firebase '+await user.getIdToken(),
-    'Content-Type':'application/pdf'},body:file,signal:AbortSignal.timeout(90000)});
-  if(!storage.ok)throw Error('Firebase Storage에 수정 PDF를 저장할 수 없습니다. 작가·관리자 권한을 확인해주세요.');
-  body={action:'resource',storagePath:path,title:String(body.get('title')||''),
-   changes:String(body.get('changes')||'')};
- }
- const isForm=body instanceof FormData;
- const r=await fetch('/api/test-room?'+new URLSearchParams({callId,...params}),{
-  method:body?'POST':'GET',
-  headers:{Authorization:'Bearer '+await user.getIdToken(),
-   ...(ready?{'X-MOAKIT-FIREBASE-FEATURE':'1'}:{}),
-   ...(!isForm&&body?{'Content-Type':'application/json'}:{})},
-  ...(body?{body:isForm?body:JSON.stringify(body)}:{}),
-  signal:AbortSignal.timeout(isForm?90000:45000)
- });
- if(window.MoaAccount?.user?.uid!==uid)throw Error('로그인 계정이 변경됐습니다.');
- if(params.file){
-  if(!r.ok){const error=await r.json().catch(()=>({}));throw Error(error.error||'PDF를 받을 수 없습니다.');}
-  return r.blob();
- }
- const response=await r.json().catch(()=>({}));
- if(!r.ok)throw Error(response.error||'테스트룸 요청 실패');
- return response;
+ return directTestRoomRequest(callId,params,body);
 }
 function state(text){const out=root.querySelector('[data-room-state]');if(out)out.textContent=text;}
 async function run(fn){if(busy)return;busy=true;try{await fn();}catch(e){state(e.message);}finally{busy=false;}}
@@ -54,7 +19,7 @@ panel.querySelector('[data-room-compose]')?.addEventListener('click',()=>compose
 function compose(slot,post,manager){const draftUid=window.MoaAccount.user.uid,draftRoom=callId,draft=readRoomDraft(sessionStorage,draftUid,draftRoom,post?.id),initial=draft||post||{};slot.innerHTML=`<form class="room-compose"><label>분류<select name="kind">${Object.entries(ROOM_KINDS).filter(([k])=>manager||!['notice','revision'].includes(k)).map(([v,t])=>`<option value="${v}" ${initial.kind===v?'selected':''}>${t}</option>`).join('')}</select></label><label>제목<input name="title" maxlength="120" value="${E(initial.title||'')}" required></label><label>내용<textarea name="body" maxlength="6000" rows="6" required>${E(initial.body||'')}</textarea></label><label>사진 최대 3장<input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>${post?.photos.length?'<label><input type="checkbox" name="removePhotos">기존 사진 삭제</label>':''}<p class="room-draft-note" data-draft-status>글은 이 브라우저 탭에 임시저장됩니다. 사진은 다시 선택해주세요.</p><p>사진은 테스트룸 참여자만 볼 수 있습니다. 새 사진을 선택하면 기존 사진을 교체합니다.</p><button class="seller-button primary" type="submit">${post?'수정 저장':'이야기 등록'}</button><button type="button" class="seller-button" data-room-cancel>취소</button><p role="status"></p></form>`;const form=slot.querySelector('form');form.oninput=()=>{const ok=saveRoomDraft(sessionStorage,draftUid,draftRoom,post?.id,{kind:form.elements.kind.value,title:form.elements.title.value,body:form.elements.body.value});form.querySelector('[data-draft-status]').textContent=ok?'글 임시저장 완료 · 사진은 임시저장하지 않습니다.':'임시저장 공간을 사용할 수 없습니다.';};slot.querySelector('[data-room-cancel]').onclick=()=>slot.replaceChildren();slot.querySelector('form').onsubmit=e=>{e.preventDefault();run(async()=>{const f=e.target,v=Object.fromEntries(new FormData(f)),files=[...f.elements.photos.files];if(files.length>3)throw Error('사진은 최대 3장입니다.');f.querySelector('[role=status]').textContent='사진 압축·게시글 저장 중…';const pics=files.length?await Promise.all(files.map(async f=>(await compressBanner(f)).dataUrl)):v.removePhotos?[]:post?.photos||[];await request({},{action:'post',kind:v.kind,title:v.title,body:v.body,photos:pics,...(post?{id:post.id,version:post.version}:{})});clearRoomDraft(sessionStorage,draftUid,draftRoom,post?.id);await load();});};}
 function confirmDelete(slot,body,done){slot.innerHTML='<div class="room-delete-confirm"><p>이 내용을 삭제할까요?</p><button class="seller-button" data-confirm-delete>삭제 확정</button><button class="seller-button" data-cancel-delete>취소</button></div>';slot.querySelector('[data-cancel-delete]').onclick=()=>slot.replaceChildren();slot.querySelector('[data-confirm-delete]').onclick=()=>run(async()=>{await request({},body);await done();});}
 async function thread(postId){const slot=root.querySelector(`[data-room-thread="${postId}"]`);if(!slot)return;slot.hidden=false;slot.textContent='댓글을 불러오고 있어요.';try{const d=await request({post:postId});if(!slot.isConnected)return;const p=posts.find(p=>p.id===postId);if(p)p.newActivity=false;slot.closest('article')?.querySelector('.room-new')?.remove();slot.innerHTML=`<div class="room-comments">${d.comments.map(c=>`<article><header><b>${E(c.authorName)}</b><time>${new Date(c.createdAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})}</time></header><p>${E(c.body)}</p>${c.canDelete&&(data.room.canWrite||data.room.role!=='tester')?`<button data-comment-delete="${E(c.id)}">삭제</button><div data-comment-confirm="${E(c.id)}"></div>`:''}</article>`).join('')||'<p>첫 댓글로 함께 이야기해요.</p>'}</div>${data.room.canWrite?'<form class="room-comment-form"><label>댓글<textarea name="body" maxlength="2000" rows="3" required placeholder="궁금한 점이나 답변을 자유롭게 남겨주세요."></textarea></label><button class="seller-button primary">댓글 등록</button></form>':''}`;slot.querySelector('form')?.addEventListener('submit',e=>{e.preventDefault();run(async()=>{await request({},{action:'comment',postId,body:new FormData(e.target).get('body')});await thread(postId);});});slot.querySelectorAll('[data-comment-delete]').forEach(b=>b.onclick=()=>confirmDelete(slot.querySelector(`[data-comment-confirm="${b.dataset.commentDelete}"]`),{action:'deleteComment',postId,commentId:b.dataset.commentDelete},()=>thread(postId)));}catch(e){if(slot.isConnected)slot.textContent=e.message;}}
-async function download(params,original=false){await run(async()=>{let blob;if(original){blob=await API.downloadFile(callId,auth());if(!blob)return;}else blob=await request(params);if(blob instanceof Blob){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='MOAKIT-test-pattern.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}});}
+async function download(params,original=false){await run(async()=>{let blob;if(original)blob=await request({original:true});else blob=await request(params);if(blob instanceof Blob){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='MOAKIT-test-pattern.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}});}
 function resources(panel,manager){panel.innerHTML=`<h2>공지·도안</h2>${data.room.notice?`<p class="room-notice">${E(data.room.notice)}</p>`:''}<p class="room-notice">원본 테스트 PDF와 수정본은 참여 권한 확인 후 내려받습니다. 파일을 외부에 공유하지 말아주세요.</p><button class="seller-button" data-room-original>원본 테스트 PDF 받기</button><div class="room-resource-list">${data.resources.map(f=>`<article><div><h3>${E(f.title)}</h3><p>${E(f.changes)}</p><small>${new Date(f.created_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})} · ${(f.byte_size/1024/1024).toFixed(2)}MB</small></div><button class="seller-button" data-room-file="${E(f.id)}">PDF 받기</button></article>`).join('')||'<p>추가 등록된 수정본이 없습니다.</p>'}</div>${manager?'<form class="room-compose" data-room-upload><h3>수정 도안 등록</h3><label>버전명<input name="title" maxlength="100" placeholder="예: v1.1 · 소매 설명 수정" required></label><label>수정 사항<textarea name="changes" maxlength="3000" rows="4" required></textarea></label><label>PDF · 10MB 이하<input name="file" type="file" accept="application/pdf" required></label><button class="seller-button primary">수정본 등록·참여자 알림</button><p role="status"></p></form>':''}`;panel.querySelector('[data-room-original]').onclick=()=>download({},true);panel.querySelectorAll('[data-room-file]').forEach(b=>b.onclick=()=>download({file:b.dataset.roomFile}));panel.querySelector('[data-room-upload]')?.addEventListener('submit',e=>{e.preventDefault();run(async()=>{e.target.querySelector('[role=status]').textContent='비공개 저장소에 PDF 업로드 중…';await request({},new FormData(e.target));await load();});});}
 function members(panel){const total=data.members.filter(m=>m.status!=='author'),submitted=total.filter(m=>['submitted','completed'].includes(m.status)),active=total.filter(m=>['in_progress','revision'].includes(m.status));panel.innerHTML=`<h2>함께하는 참여자</h2><div class="room-progress"><span>테스터 ${total.length}명</span><span>제작·보완 중 ${active.length}명</span><span>결과 제출·완료 ${submitted.length}명</span></div><p>개인 연락처와 배송 정보는 표시되지 않습니다.</p><div class="room-member-list">${data.members.map(m=>`<article><span>${E(m.name.slice(0,1))}</span><b>${E(m.name)}</b><small>${m.status==='author'?'작가':E(({confirmed:'참여 확정',in_progress:'제작 중',submitted:'결과 제출',revision:'보완 중',completed:'완료'})[m.status]||'테스터')}</small></article>`).join('')||'<p>작가가 테스트룸에 접속하면 확정 참여자 명단이 동기화됩니다.</p>'}</div>`;}
 async function records(panel,manager){panel.innerHTML=`<h2>테스트 기록</h2><p>최종 피드백과 사진은 본인·작가·관리자만 확인합니다. 공개 동의만으로 자동 공개되지 않습니다.</p><div data-room-records>기록을 불러오고 있어요.</div>`;const slot=panel.querySelector('[data-room-records]');try{if(manager){slot.innerHTML=data.members.filter(m=>m.status!=='author').map(m=>`<button class="seller-button" data-result-uid="${E(m.uid||'')}">${E(m.name)} · 기록 보기</button>`).join('')||'<p>확정 테스터가 아직 없습니다.</p>';slot.querySelectorAll('[data-result-uid]').forEach(b=>b.onclick=()=>resultDetail(slot,b.dataset.resultUid,false));}else await resultDetail(slot,window.MoaAccount.user.uid,true);}catch(e){if(slot.isConnected)slot.textContent=e.message;}}

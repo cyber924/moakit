@@ -8,6 +8,19 @@ service firebase.storage {
     }
     function validSize() { return request.resource.size > 0 && request.resource.size <= 10 * 1024 * 1024; }
 
+    // A confirmed tester may read only PDFs belonging to their private test call.
+    // Firestore is consulted during Storage rule evaluation; no Cloud Functions.
+    function testerRoomPdf(sellerUid, callId) {
+      return request.auth != null
+        && firestore.get(/databases/(default)/documents/moakitTesterCalls/$(callId)).data.sellerUid == sellerUid
+        && firestore.get(/databases/(default)/documents/moakitTesterCalls/$(callId)).data.status
+          in ['recruiting', 'closed', 'testing', 'completed']
+        && firestore.get(/databases/(default)/documents/moakitTesterCalls/$(callId)/applications/$(request.auth.uid)).data.applicantUid
+          == request.auth.uid
+        && firestore.get(/databases/(default)/documents/moakitTesterCalls/$(callId)/applications/$(request.auth.uid)).data.status
+          in ['confirmed', 'in_progress', 'submitted', 'revision', 'completed'];
+    }
+
     match /moakit/public/{uid}/{workId}/{fileName} {
       allow get: if true;
       allow list, delete: if owner(uid) || admin();
@@ -15,7 +28,8 @@ service firebase.storage {
         && request.resource.contentType in ['image/jpeg', 'image/png', 'image/webp'];
     }
     match /moakit/private/{uid}/{workId}/{fileName} {
-      allow get, list, delete: if owner(uid) || admin();
+      allow get: if owner(uid) || admin() || testerRoomPdf(uid, workId);
+      allow list, delete: if owner(uid) || admin();
       allow create, update: if (owner(uid) || admin()) && validSize()
         && request.resource.contentType == 'application/pdf' && fileName.matches('.*[.][pP][dD][fF]');
     }

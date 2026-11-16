@@ -211,4 +211,151 @@ d.body.size() <= 5000 && text(d.relatedHref, 300) && text(d.ownerName, 100) && d
 d.version == 1 && d.history is list && d.history.size() == 0 && d.createdAt is string && d.updatedAt is string; } allow get, list: if admin() || owner(resource.data.ownerUid);
 allow create: if signedIn() && newTicket(); allow update, delete: if admin(); } match /moakitSupportPrivate/{ticketId} { allow read, write: if admin(); } match
 /moakitNotificationReads/{uid}/items/{itemId} { allow read: if owner(uid); allow create, update: if owner(uid) && exactKeys(request.resource.data, ['readAt']) &&
-request.resource.data.readAt is string; allow delete: if owner(uid); } match /{document=**} { allow read, write: if false; } } }
+request.resource.data.readAt is string; allow delete: if owner(uid); } 
+  // Private tester-room documents are accessed directly via Firestore, not Functions.
+  function roomCall(callId) {
+    return get(/databases/$(database)/documents/moakitTesterCalls/$(callId)).data;
+  }
+  function roomManager(callId) {
+    return admin() || (signedIn()
+      && exists(/databases/$(database)/documents/moakitTesterCalls/$(callId))
+      && roomCall(callId).sellerUid == request.auth.uid);
+  }
+  function roomParticipant(callId) {
+    return signedIn()
+      && exists(/databases/$(database)/documents/moakitTesterCalls/$(callId))
+      && roomCall(callId).status in ['recruiting','closed','testing','completed']
+      && request.time >= timestamp.value(roomCall(callId).testStart)
+      && exists(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(request.auth.uid))
+      && get(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(request.auth.uid)).data.applicantUid == request.auth.uid
+      && get(/databases/$(database)/documents/moakitTesterCalls/$(callId)/applications/$(request.auth.uid)).data.status in
+        ['confirmed','in_progress','submitted','revision','completed'];
+  }
+  function roomReader(callId) {
+    return roomManager(callId) || roomParticipant(callId);
+  }
+  function roomWriter(callId) {
+    return roomReader(callId)
+      && roomCall(callId).status in ['recruiting','closed','testing']
+      && request.time <= timestamp.value(roomCall(callId).testEnd)
+      && (roomManager(callId) || request.time >= timestamp.value(roomCall(callId).testStart));
+  }
+  function validRoomPhotos(items) {
+    return items is list && items.size() <= 3
+      && (items.size() < 1 || (items[0] is string && items[0].size() <= 270000))
+      && (items.size() < 2 || (items[1] is string && items[1].size() <= 270000))
+      && (items.size() < 3 || (items[2] is string && items[2].size() <= 270000));
+  }
+  match /moakitTesterCalls/{callId}/roomPosts/{postId} {
+    allow get, list: if roomReader(callId);
+    allow create: if roomWriter(callId)
+      && request.resource.data.keys().hasOnly(['id','authorUid','authorName','kind','title','body',
+        'photos','deleted','resolved','createdAt','updatedAt','lastActivityAt','version','commentCount'])
+      && request.resource.data.keys().hasAll(['id','authorUid','authorName','kind','title','body',
+        'photos','deleted','resolved','createdAt','updatedAt','lastActivityAt','version','commentCount'])
+      && request.resource.data.id == postId
+      && request.resource.data.authorUid == request.auth.uid
+      && request.resource.data.authorName is string && request.resource.data.authorName.size() <= 100
+      && request.resource.data.kind in ['question','progress','story','notice','revision']
+      && (roomManager(callId) || !(request.resource.data.kind in ['notice','revision']))
+      && request.resource.data.title is string && request.resource.data.title.size() > 0
+      && request.resource.data.title.size() <= 120
+      && request.resource.data.body is string && request.resource.data.body.size() > 0
+      && request.resource.data.body.size() <= 6000
+      && validRoomPhotos(request.resource.data.photos)
+      && request.resource.data.deleted == false && request.resource.data.resolved == false
+      && request.resource.data.version == 1 && request.resource.data.commentCount == 0;
+    allow update: if
+      (roomWriter(callId) && resource.data.deleted == false
+        && resource.data.authorUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['kind','title','body','photos','version','updatedAt','lastActivityAt'])
+        && request.resource.data.version == resource.data.version + 1
+        && request.resource.data.kind in ['question','progress','story','notice','revision']
+        && (roomManager(callId) || !(request.resource.data.kind in ['notice','revision']))
+        && request.resource.data.title is string && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.body is string && request.resource.data.body.size() > 0
+        && request.resource.data.body.size() <= 6000
+        && validRoomPhotos(request.resource.data.photos))
+      || (roomWriter(callId) && roomManager(callId) && resource.data.kind == 'question'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolved','updatedAt'])
+        && request.resource.data.resolved is bool)
+      || (roomWriter(callId) && resource.data.deleted == false
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['commentCount','lastActivityAt'])
+        && request.resource.data.commentCount is int
+        && request.resource.data.commentCount >= 0
+        && (request.resource.data.commentCount == resource.data.commentCount + 1
+          || request.resource.data.commentCount == resource.data.commentCount - 1))
+      || (roomReader(callId) && (roomManager(callId) || resource.data.authorUid == request.auth.uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted','updatedAt'])
+        && request.resource.data.deleted == true);
+    allow delete: if false;
+  }
+  match /moakitTesterCalls/{callId}/roomComments/{commentId} {
+    allow get, list: if roomReader(callId);
+    allow create: if roomWriter(callId)
+      && request.resource.data.keys().hasOnly(['id','postId','authorUid','authorName','body','deleted','createdAt'])
+      && request.resource.data.keys().hasAll(['id','postId','authorUid','authorName','body','deleted','createdAt'])
+      && request.resource.data.id == commentId
+      && request.resource.data.authorUid == request.auth.uid
+      && request.resource.data.authorName is string && request.resource.data.authorName.size() <= 100
+      && request.resource.data.body is string && request.resource.data.body.size() > 0
+      && request.resource.data.body.size() <= 2000
+      && request.resource.data.deleted == false
+      && request.resource.data.postId is string
+      && exists(/databases/$(database)/documents/moakitTesterCalls/$(callId)/roomPosts/$(request.resource.data.postId))
+      && get(/databases/$(database)/documents/moakitTesterCalls/$(callId)/roomPosts/$(request.resource.data.postId)).data.deleted == false;
+    allow update: if roomReader(callId)
+      && (roomManager(callId) || resource.data.authorUid == request.auth.uid)
+      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted'])
+      && request.resource.data.deleted == true;
+    allow delete: if false;
+  }
+  match /moakitTesterCalls/{callId}/roomResources/{resourceId} {
+    allow get, list: if roomReader(callId);
+    allow create: if roomWriter(callId) && roomManager(callId)
+      && request.resource.data.keys().hasOnly(['id','title','changes','path','byte_size','created_at','actorUid'])
+      && request.resource.data.keys().hasAll(['id','title','changes','path','byte_size','created_at','actorUid'])
+      && request.resource.data.id == resourceId
+      && request.resource.data.actorUid == request.auth.uid
+      && request.resource.data.title is string && request.resource.data.title.size() > 0
+      && request.resource.data.title.size() <= 100
+      && request.resource.data.changes is string && request.resource.data.changes.size() > 0
+      && request.resource.data.changes.size() <= 3000
+      && request.resource.data.path is string
+      && request.resource.data.path.matches('^moakit/private/' + roomCall(callId).sellerUid
+        + '/' + callId + '/[A-Za-z0-9-]+[.]pdf } }
+)
+      && request.resource.data.byte_size is int
+      && request.resource.data.byte_size > 0 && request.resource.data.byte_size <= 10485760;
+    allow update, delete: if false;
+  }
+  match /moakitTesterCalls/{callId}/roomReads/{readId} {
+    allow get: if roomReader(callId) && signedIn()
+      && resource.data.uid == request.auth.uid;
+    allow list: if false;
+    allow create, update: if roomReader(callId) && signedIn()
+      && request.resource.data.keys().hasOnly(['uid','postId','readAt'])
+      && request.resource.data.keys().hasAll(['uid','postId','readAt'])
+      && request.resource.data.uid == request.auth.uid
+      && request.resource.data.postId is string
+      && request.resource.data.readAt is string
+      && readId == request.auth.uid + '_' + request.resource.data.postId;
+    allow delete: if false;
+  }
+  match /moakitTesterCalls/{callId}/private/firebaseFile {
+    allow get: if roomReader(callId);
+    allow list: if false;
+    allow create: if roomManager(callId)
+      && request.resource.data.keys().hasOnly(['blob','expiresAt','createdAt'])
+      && request.resource.data.blob is string && request.resource.data.blob.size() <= 5000
+      && request.resource.data.expiresAt is string && request.resource.data.createdAt is string;
+    allow update: if roomManager(callId)
+      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['expiresAt'])
+      && request.resource.data.expiresAt is string;
+    allow delete: if false;
+  }
+
+match /{document=**} { allow read, write: if false; } } }
