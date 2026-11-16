@@ -1,6 +1,6 @@
 import {encodeFields,decodeDocument} from './member-core.mjs';
 import {canonical,changedFields,nextPdfVersion} from './work-record-core.mjs';
-import {firestoreBrowserUrl} from './firebase-firestore-transport.mjs';
+import {firestoreBrowserRequest} from './firebase-firestore-transport.mjs';
 
 const PROJECT='studio-1613487721-b043c';
 const ROOT=`projects/${PROJECT}/databases/(default)/documents`;
@@ -9,7 +9,7 @@ const BUCKET=PROJECT+'.firebasestorage.app';
 const validId=id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id);
 const basePath=(uid,workId)=>`moakitUsers/${uid}/works/${workId}`;
 async function call(path,token,{fetcher=fetch,missing=false}={}){
- const response=await fetcher(firestoreBrowserUrl(BASE+'/'+path,fetcher),{headers:token?{Authorization:'Bearer '+token}:{},signal:AbortSignal.timeout(30000)});
+ const response=await firestoreBrowserRequest(BASE+'/'+path,{headers:token?{Authorization:'Bearer '+token}:{},signal:AbortSignal.timeout(30000)},fetcher);
  if(missing&&response.status===404)return null;
  const data=await response.json().catch(()=>({}));
  if(!response.ok)throw Error(response.status===403?'등록기록 접근 권한이 없습니다. Firestore 규칙을 확인해주세요.':data.error?.message||'등록기록을 불러오지 못했습니다.');
@@ -42,9 +42,9 @@ async function listOriginalFirebaseRecords(token,uid,workId,fetcher){
  const query={structuredQuery:{from:[{collectionId:'moakitWorkRecords'}],
   where:{fieldFilter:{field:{fieldPath:'sellerUid'},op:'EQUAL',value:{stringValue:uid}}},
   limit:1000}};
- const response=await fetcher(firestoreBrowserUrl(BASE+':runQuery',fetcher),{method:'POST',
+ const response=await firestoreBrowserRequest(BASE+':runQuery',{method:'POST',
   headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-  body:JSON.stringify(query),signal:AbortSignal.timeout(30000)});
+  body:JSON.stringify(query),signal:AbortSignal.timeout(30000)},fetcher);
  const data=await response.json().catch(()=>({}));
  if(!response.ok)throw Error(response.status===403
   ?'기존 Firebase 등록기록 읽기 권한이 없습니다. moakitWorkRecords Firestore 규칙을 게시해주세요.'

@@ -1,9 +1,11 @@
-import {initializeApp} from './vendor/firebase-app.js';
-import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,setPersistence,browserLocalPersistence,browserSessionPersistence,signOut,updateProfile,getIdToken,getIdTokenResult} from './vendor/firebase-auth.js';
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
+import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,setPersistence,browserLocalPersistence,browserSessionPersistence,signOut,updateProfile,getIdToken,getIdTokenResult} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import {PROFILE_COLLECTION,encodeFields,decodeDocument} from './member-core.mjs';
 
 const firebaseConfig={apiKey:'AIzaSyAwQpw0Q9vp8q_zpGL600yY47CMcogvXxg',authDomain:'studio-1613487721-b043c.firebaseapp.com',projectId:'studio-1613487721-b043c',storageBucket:'studio-1613487721-b043c.firebasestorage.app',messagingSenderId:'92016568969',appId:'1:92016568969:web:c9415e8ae4dd6cbc78f458'};
 const app=initializeApp(firebaseConfig);const auth=getAuth(app);
+// Shared with the direct Firestore browser SDK; retains the existing Auth session.
+export const firebaseApp=app;
 const base=`https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
 const fail=(code,message)=>Object.assign(new Error(message||code),{code});
 async function request(path,{method='GET',body,query={},allowMissing=false}={}){
