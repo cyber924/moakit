@@ -46,7 +46,7 @@ test('publication and registration commit together and commit failure is surface
   throw Error('Unexpected URL '+path);
  };
  await savePatternToFirebase({user},d,{record:true,fetcher});
- assert.equal(body.writes.length,4);
+ assert.equal(body.writes.length,5); // published source + public catalog + 3 registration writes
  assert.ok(body.writes.some(w=>w.update.name.includes('/works/'+d.id+'/records/')));
  assert.ok(body.writes.some(w=>w.update.name.includes('/moakitRecordProofs/')));
  rejectCommit=true;
