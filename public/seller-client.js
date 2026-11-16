@@ -37,7 +37,7 @@ export async function getWork(F,id){
  if(uid(F)!==mine)throw Error('로그인 계정이 변경됐어요.');
  return d;
 }
-export async function saveDraft(F,d,{record=true,reason=''}={}){
+export async function saveDraft(F,d,{record=false,reason=''}={}){
  const mine=uid(F);
  if(d.sellerUid!==mine)throw Error('본인 작품만 저장할 수 있습니다.');
  const updatedAt=await savePatternToFirebase(F,d,{record,reason});

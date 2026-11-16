@@ -98,7 +98,8 @@ export async function savePatternToFirebase(F,d,{fetcher=fetch,record=false,reas
  }
  if(uid!==F.user?.uid)throw error('로그인 계정이 변경됐습니다.',401);
  const writes=draftWrites(draft,source,listing);
- if(record)writes.push(...await prepareRecordWrites(F.user,draft,source,{reason,fetcher}));
+ // Only a final publication or an explicit published-work edit creates a certificate.
+ if(record&&draft.status==='published')writes.push(...await prepareRecordWrites(F.user,draft,source,{reason,fetcher}));
  await fireRequest(':commit',token,{method:'POST',body:{writes},fetcher});
  return draft.updatedAt;
 }
