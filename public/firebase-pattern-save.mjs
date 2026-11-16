@@ -12,10 +12,11 @@ const idOK=value=>typeof value==='string'&&/^[A-Za-z0-9-]{1,128}$/.test(value);
 const error=(message,status=400)=>Object.assign(Error(message),{status});
 
 async function fireRequest(path,token,{method='GET',body,fetcher=fetch,missing=false,hiddenAsMissing=false}={}){
- const response=await fetcher(REST+path,{
+ let response;
+ try{response=await fetcher(REST+path,{
   method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
   ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(35000)
- });
+ });}catch(e){const stage=path===':commit'?'작품·등록기록 저장':path.startsWith('/moakitPatterns/')?'공개 도안 확인':'작품 원본 확인';throw error(stage+' 연결 실패: '+(e.name==='TimeoutError'?'시간 초과':'네트워크 오류'),503);}
  if(missing&&(response.status===404||hiddenAsMissing&&response.status===403))return null;
  const result=await response.json().catch(()=>({}));
  if(!response.ok)throw error(response.status===403?
