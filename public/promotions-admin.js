@@ -1,3 +1,4 @@
+import {firebasePromotionImages} from './promotions-firebase.mjs';
 import {promoRequest,compressBanner} from './promotions-client.js';
 import {imageUrl,bannerMarkup,promoState,promotionPlacements} from './promotions-core.mjs';
 import {resetPromotions} from './promotions.js';
@@ -29,9 +30,11 @@ export function mountPromotionsAdmin(target){const uid=window.MoaAccount?.user?.
     const d=await r.json().catch(()=>({}));
     if(!r.ok)throw Error(d.error||'Firebase 이미지 목록을 불러오지 못했습니다.');
     if(!live()||!draft)return;
-    images=d.images||[];
+    const direct=cursor?[]:await firebasePromotionImages();
+    if(!live()||!draft)return;
+    images=[...direct,...(d.images||[])];
     imageCursor=d.nextCursor||'';
-    imageTotal=d.allTotal||0;
+    imageTotal=(d.allTotal||0)+direct.length;
     imageBytes=d.totalBytes||0;
     paintImages();
   }catch(e){showNotice(e.message,true);}
@@ -42,3 +45,4 @@ export function mountPromotionsAdmin(target){const uid=window.MoaAccount?.user?.
  async function loadProducts(more=false){const current=draft;try{const d=await call({catalog:draft.kind,query:productQuery,...(more&&productCursor?{cursor:productCursor}:{})});if(!live()||draft!==current)return;productRows=more?[...productRows,...d.products]:d.products;productCursor=d.nextCursor;paintProducts();}catch(e){if(live())target.querySelector('[data-product-picker]').textContent=e.message;}}
  function paintProducts(){if(!draft||!target.querySelector('[data-product-picker]'))return;const links=target.querySelector('[data-link-products]');if(links){links.innerHTML='<option value="">상품 상세 연결 시 선택</option>'+productRows.map(p=>`<option value="${E(p.id)}" ${draft.targetId===p.id?'selected':''}>${E(p.title)}</option>`).join('')+(draft.targetId&&!productRows.some(p=>p.id===draft.targetId)?`<option selected value="${E(draft.targetId)}">${E(draft.targetId)}</option>`:'');}paintSelected();target.querySelector('[data-product-picker]').innerHTML=`<div class="promo-product-picker">${productRows.map(p=>`<label>${p.image?`<img src="${E(p.image)}" alt="" loading="lazy">`:''}<span>${E(p.title)}<small>${money(p.price)}</small></span><input type="checkbox" data-product-select="${E(p.id)}" ${draft.productIds.includes(p.id)?'checked':''}></label>`).join('')||'<p>상품이 없거나 현재 페이지에 검색 결과가 없습니다.</p>'}</div>`;target.querySelectorAll('[data-product-select]').forEach(c=>c.onchange=()=>{if(c.checked&&!draft.productIds.includes(c.dataset.productSelect)){if(draft.productIds.length>=100){c.checked=false;showNotice('연결 상품은 최대 100개입니다.',true);return;}draft.productIds.push(c.dataset.productSelect);}else draft.productIds=draft.productIds.filter(id=>id!==c.dataset.productSelect);paintSelected();});target.querySelector('[data-product-more]').innerHTML=productCursor?button('다음 상품 더 보기','data-more-products'):'';target.querySelector('[data-more-products]')?.addEventListener('click',()=>loadProducts(true));}
  list();}
+

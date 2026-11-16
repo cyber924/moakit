@@ -1,6 +1,6 @@
 export const IMAGE_LIMIT=200000;
 export const promoVisible=(p,now=new Date().toISOString())=>p.status==='published'&&(!p.startsAt||p.startsAt<=now)&&(!p.endsAt||p.endsAt>now);
-export const imageUrl=id=>'/api/promotions?image='+encodeURIComponent(id);
+export const imageUrl=id=>{const m=/^fb_([A-Za-z0-9_-]+)_([a-f0-9-]{36})$/i.exec(id||'');return m?'https://firebasestorage.googleapis.com/v0/b/studio-1613487721-b043c.firebasestorage.app/o/'+encodeURIComponent('moakit/public/'+m[1]+'/kit/'+m[2]+'.webp')+'?alt=media':'/api/promotion-image?image='+encodeURIComponent(id);};
 export const promoState=(p,now=new Date().toISOString())=>p.status==='deleted'?'삭제됨':p.status!=='published'?'숨김':p.endsAt&&p.endsAt<=now?'기간 종료':p.startsAt&&p.startsAt>now?'예약':'공개';
 export function cleanPromotion(p){
  if(!p||!['kit','pattern'].includes(p.kind)||!['draft','published'].includes(p.status))throw Error('구분과 공개 상태를 확인해주세요.');
@@ -31,3 +31,4 @@ export function promotionTarget(p){
 export function selectHomePromotions(rows,now=new Date().toISOString()){
  return rows.filter(p=>promotionPlacements(p).includes('home')&&promoVisible(p,now)).sort((a,b)=>(a.heroSlot||6)-(b.heroSlot||6)||a.rank-b.rank||String(a.id).localeCompare(String(b.id))).slice(0,6);
 }
+

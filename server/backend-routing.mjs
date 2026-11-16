@@ -37,6 +37,7 @@ export function backendRoute(request) {
     && request.headers.get('x-moakit-firebase-feature') === '1') return { local: true };
 
   if (url.pathname === '/api/commerce-status' || url.pathname === '/api/commerce-health' || url.pathname === '/api/commerce-finance' || url.pathname === '/api/commerce-diagnostics' || url.pathname === '/api/commerce-cutover') return { local: true };
+  if (url.pathname === '/api/ai-draft' || url.pathname === '/api/promotion-image') return { local: true };
   if (url.pathname === '/api/seller/extract' || url.pathname === '/api/image-copy' || url.pathname === '/api/image-assets' || url.pathname === '/api/kit-sample' || url.pathname === '/api/kit-sample-copy' || url.pathname === '/api/site-asset' || url.pathname === '/api/site-asset-copy') return { local: true };
   if (url.pathname === '/api/promotions' && request.method === 'GET' && url.searchParams.has('image')) return { local: true };
   if (!SHARED_API_PATHS.has(url.pathname)) return { status: 404, error: '요청한 기능을 찾을 수 없습니다.' };
@@ -50,3 +51,4 @@ export function backendRoute(request) {
   headers.set('origin', BACKEND_ORIGIN);
   return { target: target.toString(), headers };
 }
+
