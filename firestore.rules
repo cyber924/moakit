@@ -358,4 +358,9 @@ request.resource.data.readAt is string; allow delete: if owner(uid); }
     allow delete: if false;
   }
 
-match /{document=**} { allow read, write: if false; } } }
+match /moakitWorkRecords/{recordId} {
+  // Existing Firestore registration records: owner/admin may read; never mutate.
+  allow get, list: if admin() ||
+    (signedIn() && resource.data.sellerUid == request.auth.uid);
+  allow create, update, delete: if false;
+} match /{document=**} { allow read, write: if false; } } }

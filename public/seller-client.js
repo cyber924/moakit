@@ -23,7 +23,7 @@ export async function listDrafts(F){
   for(const d of drafts)d.listingStatus=statuses.get(d.id)||null;
  }
  const versions=await Promise.allSettled(drafts.map(d=>listFirebaseRecords(F.user,mine,d.id)));
- drafts.forEach((d,i)=>{if(versions[i].status==='fulfilled')d.recordVersion=versions[i].value[0]?.pdf_version||'';});
+ drafts.forEach((d,i)=>{if(versions[i].status==='fulfilled')d.recordVersion=versions[i].value[0]?.pdf_version||'';else{d.recordVersion='기록 조회 실패';console.warn('MOAKIT_RECORD_READ',d.id,versions[i].reason?.message||'접근 오류');}});
  try{const calls=await listCalls([['sellerUid',mine]],F);const testing=new Set(calls.filter(c=>['recruiting','closed','testing'].includes(c.status)).map(c=>c.workId));for(const d of drafts)d.testing=testing.has(d.id);}catch(error){console.warn('테스터 진행 상태를 불러오지 못했습니다.',error);}
 
  return drafts;
