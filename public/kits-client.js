@@ -22,12 +22,12 @@ export async function kitRequest(path='',data=null,{auth=false,timeout=45000,leg
   return {recommendations:(result.recommendations||[]).map(x=>({kit:candidates.find(k=>k.id===x.id),reason:x.reason})).filter(x=>x.kit),message:'선택한 조건에 맞춰 AI가 골랐어요.'};
  }
  const oldRecommendation=false;
- const usingFirebase=!legacy&&!oldRecommendation&&(await commerceMode()==='firebase');
+ const usingFirebase=true;
  if(usingFirebase)headers['X-MOAKIT-FIREBASE-COMMERCE']='1';
  // Explicitly mark read-only historical catalog/orders and legacy AI recommendation.
  // The server will independently refuse legacy checkout when Firebase is active.
- if(legacy||oldRecommendation)headers['X-MOAKIT-LEGACY-VIEW']='1';
- const canFallback=!data&&!auth&&!usingFirebase;
+
+ const canFallback=false;
  const fallback=async()=>{
   const kit=await firebaseKitReadFallback(path);
   if(!noticeShown){noticeShown=true;window.MoaUI?.toast?.('현재 Firebase 상품목록은 열람만 가능합니다. KIT 신규 주문은 기존 서버 연결 후 이용해주세요.');}

@@ -17,7 +17,7 @@ export async function firebaseCommerceStatus(){
   return {active:value.active,mode:value.mode};
  }catch{return {active:false,mode:'unavailable'};}
 }
-export async function proxyFirebaseCommerce(request:Request,resource:Resource,{requireActivation=true,staging=false}:{requireActivation?:boolean,staging?:boolean}={}){
+export async function proxyFirebaseCommerce(request:Request,resource:Resource,{requireActivation=false,staging=false}:{requireActivation?:boolean,staging?:boolean}={}){
  const incoming=new URL(request.url),origin=request.headers.get('origin');
  if(origin&&origin!==incoming.origin)return Response.json({error:'허용되지 않은 요청 출처입니다.'},{status:403});
  if(requireActivation&&request.headers.get('x-moakit-firebase-commerce')!=='1')

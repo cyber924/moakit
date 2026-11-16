@@ -4,21 +4,7 @@ const db=managedStore();
 const collection='moakitAiContent';
 const marker=kind=>'migration_'+kind+'_v1';
 function present(row){return {...row,version:row._updateTime};}
-async function legacyItems(kind){
- const user=window.MoaAccount?.user;if(!user)throw Error('관리자 로그인이 필요합니다.');
- const r=await fetch('/api/ai-content?kind='+encodeURIComponent(kind)+'&admin=1',{headers:{Authorization:'Bearer '+await user.getIdToken()},signal:AbortSignal.timeout(30000)});
- const d=await r.json().catch(()=>({}));if(!r.ok||!Array.isArray(d.items))throw Error('기존 AI 콘텐츠 이전을 확인하지 못했습니다.');return d.items;
-}
-async function migrate(kind){
- if(await db.get(collection,marker(kind),{admin:true}))return;
- const old=await legacyItems(kind);
- for(const item of old){
-  if(!item?.id||item.status==='deleted')continue;
-  const existing=await db.get(collection,item.id,{admin:true});
-  if(!existing){try{await db.save(collection,{...item,kind,status:item.status==='published'?'published':'draft'});}catch(e){if(![409,412].includes(e.status))throw e;}}
- }
- try{await db.save(collection,{id:marker(kind),kind:'migration',status:'draft',completedAt:new Date().toISOString()});}catch(e){if(![409,412].includes(e.status))throw e;}
-}
+async function migrate(kind){return;}
 async function aiRequest(kind,body){
  const user=window.MoaAccount?.user;if(!user)throw Error('관리자 로그인이 필요합니다.');
  const uid=user.uid;

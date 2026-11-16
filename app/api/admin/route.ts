@@ -11,8 +11,6 @@ export async function POST(request:Request){
  const origin=request.headers.get('origin');
  if(origin && origin!==new URL(request.url).origin)
   return Response.json({error:'다른 사이트의 요청은 허용하지 않습니다.'},{status:403});
- if(request.headers.get('x-moakit-admin-local')!=='1')
-  return Response.json({error:'Firebase 관리자 조회 요청 형식이 아닙니다.'},{status:400});
  let action;
  try{
   const raw=await request.clone().text();

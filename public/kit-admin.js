@@ -15,10 +15,10 @@ export async function mountKitAdmin(target){
    const saved=await listFirebaseKits();
    if(!live()||mine!==listEpoch)return;
    if(!saved.length)throw Error('Firebase에 복사된 KIT가 없습니다.');
-   target.innerHTML='<div class="member-notice">기존 Work KIT 관리 서버에 연결할 수 없어 Firebase의 복사된 상품 목록을 읽기 전용으로 표시합니다. 재고·가격은 마지막 복사 시점의 값이며, 상품 수정·재고 처리·신규 주문은 기존 서버 복구 후 이용해주세요.</div>'+
+   target.innerHTML='<div class="member-notice">Firebase KIT 조회에 실패해 저장된 상품 목록을 표시합니다. 최신 상태를 확인한 후 다시 시도해주세요.</div>'+
     '<p class="kit-admin-result">Firebase KIT 상품 '+saved.length+'개</p><div class="kit-admin-table-wrap"><table class="kit-admin-table"><thead><tr><th>상품</th><th>가격</th><th>복사된 재고</th><th>상태</th></tr></thead><tbody>'+
     saved.map(k=>'<tr><td>'+E(k.data.title||k.id)+'</td><td>'+money(k.data.price||0)+'</td><td>'+(kitSoldOut(k)?'품절':'판매 중')+'</td><td>'+E(k.status)+'</td></tr>').join('')+
-    '</tbody></table></div><button type="button" class="seller-button" data-kit-retry>Work 상품 관리 다시 연결</button>';
+    '</tbody></table></div><button type="button" class="seller-button" data-kit-retry>KIT 관리 다시 조회</button>';
    target.querySelector('[data-kit-retry]').onclick=list;
   }catch(fallbackError){
    if(live()&&mine===listEpoch){target.innerHTML=`<p role="alert">${E(e.message)}</p><button class="seller-button" data-kit-retry>다시 불러오기</button>`;target.querySelector('button').onclick=list;}

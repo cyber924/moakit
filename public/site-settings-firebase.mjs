@@ -14,16 +14,11 @@ export function cleanSocialLinks(links){
  }
  return out;
 }
-async function oldLinks(){
- const response=await fetch('/api/site-settings',{signal:AbortSignal.timeout(15000)});
- if(!response.ok)throw Error('기존 소셜 링크를 확인하지 못했습니다.');
- return cleanSocialLinks((await response.json()).links);
-}
 export async function readSocialLinks({admin=false}={}){
  const doc=await store.get(collection,id,{admin});
  if(doc)return {links:cleanSocialLinks(doc.links),version:doc._updateTime};
- if(!admin)return {links:await oldLinks(),version:''};
- const links=await oldLinks();
+ if(!admin)return {links:empty(),version:''};
+ const links=empty();
  try{const value=await store.save(collection,{id,status:'published',recordType:'site-settings',links});return {links:cleanSocialLinks(value.links),version:value._updateTime};}
  catch(e){if(![409,412].includes(e.status))throw e;const value=await store.get(collection,id,{admin:true});return {links:cleanSocialLinks(value.links),version:value._updateTime};}
 }
