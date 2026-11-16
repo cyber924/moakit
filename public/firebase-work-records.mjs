@@ -1,11 +1,10 @@
 import {encodeFields,decodeDocument} from './member-core.mjs';
-import {canonical,changedFields,nextPdfVersion} from './work-record-core.mjs';
+import {canonical,changedFields,nextPdfVersion,samePdfFile} from './work-record-core.mjs';
 import {firestoreBrowserRequest} from './firebase-firestore-transport.mjs';
 
 const PROJECT='studio-1613487721-b043c';
 const ROOT=`projects/${PROJECT}/databases/(default)/documents`;
 const BASE=`https://firestore.googleapis.com/v1/${ROOT}`;
-const BUCKET=PROJECT+'.firebasestorage.app';
 const validId=id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id);
 const basePath=(uid,workId)=>`moakitUsers/${uid}/works/${workId}`;
 async function call(path,token,{fetcher=fetch,missing=false}={}){
@@ -92,23 +91,27 @@ export async function prepareRecordWrites(user,draft,source,{reason='',fetcher=f
  let file=null;
  if(draft.file){
   const original=draft.file;
-  if(!original.path?.startsWith(`moakit/private/${uid}/${workId}/`))throw Error('PDF 원본 경로를 확인해주세요.');
-  const response=await fetcher(`https://firebasestorage.googleapis.com/v0/b/${BUCKET}/o/${encodeURIComponent(original.path)}?alt=media`,{headers:{Authorization:'Firebase '+token},signal:AbortSignal.timeout(60000)});
-  if(!response.ok)throw Error('PDF 원본을 확인할 수 없어 등록기록을 만들지 못했습니다.');
-  const bytes=await response.arrayBuffer();if(bytes.byteLength!==Number(original.size))throw Error('PDF 저장 크기가 일치하지 않습니다.');
-  // The original PDF is already verified in Firebase Storage. Do not require a
-  // second Storage upload to issue a registration record: this blocked publishing
-  // when the record-files path had not been configured in Storage rules.
-  const sha256=await hash(bytes);
-  file={name:String(original.name||'pattern.pdf').slice(0,150),size:bytes.byteLength,
-   sha256,sourcePath:original.path};
+  if(!original.path?.startsWith('moakit/private/'+uid+'/'+workId+'/'))
+   throw Error('PDF 원본 경로를 확인해주세요.');
+  const size=Number(original.size);
+  if(!Number.isSafeInteger(size)||size<1||size>10485760)
+   throw Error('PDF 저장 크기를 확인해주세요.');
+  const sha=String(original.sha256||'').toLowerCase();
+  if(sha&&!/^[a-f0-9]{64}$/.test(sha))
+   throw Error('PDF SHA-256 확인값이 올바르지 않습니다.');
+  // The uploader already checked Firebase Storage. Do not GET ?alt=media
+  // again during publication: a network/CORS failure must not block Firestore.
+  // sha256 is included ONLY when calculated from the local PDF's bytes.
+  file={name:String(original.name||'pattern.pdf').slice(0,150),size,
+   sourcePath:original.path,generation:String(original.generation||''),
+   ...(sha?{sha256:sha}:{})};
  }
  const fields=['title','description','technique','level','sizes','yarn','needles','gauge','tools','skills','measures','composition','yarnUnit','amount','structure','language','pdfContents','originalAuthor','videoUrl'];
  const snapshot={...Object.fromEntries(fields.map(k=>[k,draft.info?.[k]||''])),category:draft.category||'',sellerName:draft.sellerName||'',price:draft.price||'',status:draft.status,images:(draft.images||[]).map(v=>v.path||v),file,existingCreatedAt:draft.createdAt};
  const before=previous?.snapshot||{},changes=changedFields(before,snapshot);snapshot.changes=changes;
  const sequence=(state?.sequence||0)+1,id=crypto.randomUUID(),stamp=draft.updatedAt;
  const originalStatus=source?decodeDocument(source).status:null;
- const kind=!previous?(originalStatus==='published'?'baseline':'registered'):before.file?.sha256!==file?.sha256?'pdf':before.status!==snapshot.status?'status':'edited';
+ const kind=!previous?(originalStatus==='published'?'baseline':'registered'):!samePdfFile(before.file,file)?'pdf':before.status!==snapshot.status?'status':'edited';
  const receipt={id,sellerUid:uid,workId,sequence,kind,registration_no:'MOAKIT-'+uid.slice(0,8)+'-'+workId.slice(0,12),pdf_version:nextPdfVersion(previous,file),created_at:stamp,actor_name:String(draft.sellerName||user.email||'작가').slice(0,60),reason:String(reason).slice(0,350),snapshot:JSON.stringify(snapshot),digest:''};
  receipt.digest=await hashText(canonical({...receipt,digest:undefined}));
  const proofId='f-'+id;
