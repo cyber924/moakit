@@ -66,27 +66,33 @@ test('invalid/unsafe legacy records fail rather than creating fabricated purchas
  assert.throws(()=>orderFromLegacyPatternPurchase({...pattern,buyerUid:'different'},pattern.buyerUid));
  assert.throws(()=>orderFromLegacyKit({id:'k1',buyerUid:'uid',total:0,items:[]}));
 });
-test('Firebase finance screens retire old D1 and Work import buttons without losing active settlement controls',()=>{
+test('sales and settlement admin pages use separate Firebase dashboards without Work/D1 routes',()=>{
  const read=name=>readFileSync(new URL('../public/'+name,import.meta.url),'utf8');
- const admin=read('finance-firestore-admin.js');
  const shell=read('finance-admin.js');
+ const sales=read('finance-sales-dashboard.mjs');
+ const settlement=read('finance-settlement-dashboard.mjs');
+ const compatibility=read('finance-firestore-admin.js');
  const logic=read('finance-firestore.mjs');
- const actions=[...admin.matchAll(/data-fin-db-action="([^"]+)"/g)].map(match=>match[1]);
- assert.deepEqual([...new Set(actions)],['refresh']);
- for(const obsolete of [
-  'orders-all','audit','sales','kits','batches'
- ])assert.ok(!actions.includes(obsolete),'retired button '+obsolete);
- assert.doesNotMatch(admin,/auditWorkOrders|migrateAllOrders|importLegacySales|importLegacyKitOrders|importLegacySettlements|listLegacyPurchasePage|X-MOAKIT-LEGACY-VIEW/);
- assert.match(admin,/tallyOrderMatches/);
- assert.match(admin,/reconcileTestFinance/);
- assert.match(admin,/confirmTestSale\(order\)/);
- assert.match(admin,/createTestSettlement\(settlementInput\)/);
- assert.match(admin,/data-verify-order/);
- assert.match(admin,/data-refund-pattern/);
- assert.match(admin,/data-create-settlement/);
- assert.doesNotMatch(shell,/legacyApi:api/);
- assert.match(shell,/mountFirebaseFinanceAdmin\(body\)/);
+ assert.match(shell,/mountSalesDashboard/);
+ assert.match(shell,/mountSettlementDashboard/);
+ assert.match(shell,/mountKitOrders/);
+ assert.doesNotMatch(shell,/\/api\/finance|data-sync|legacyApi:api/);
+ for(const dashboard of [sales,settlement]){
+  assert.match(dashboard,/pageSlice/);
+  assert.match(dashboard,/data-.*-period/);
+  assert.match(dashboard,/data-.*-refresh/);
+  assert.match(dashboard,/csvText/);
+  assert.doesNotMatch(dashboard,/\/api\/finance|Work 서버|data-fin-db-action|미검증 테스트 원장|검증된 테스트 판매/);
+ }
+ assert.match(sales,/data-sale-export/);
+ assert.match(sales,/reportableSales/);
+ assert.doesNotMatch(sales,/orderGap|fin-audit|13\/16/);
+ assert.match(settlement,/reportableSales/);
+ assert.match(settlement,/reconcileTestFinance/);
+ assert.match(settlement,/data-settle-create/);
+ assert.match(settlement,/\/api\/commerce-finance/);
+ assert.match(compatibility,/mountSalesDashboard as mountFirebaseFinanceAdmin/);
+ assert.doesNotMatch(compatibility,/importLegacySales|importLegacyKitOrders/);
  assert.match(logic,/currentDocument\.exists=false/);
  assert.match(logic,/sourceOrderId!==row\.sourceOrderId|saved\.productId!==row\.productId/);
- assert.match(logic,/importLegacySettlements/);
 });

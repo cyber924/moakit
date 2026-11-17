@@ -1,0 +1,51 @@
+/* Firebase finance dashboards: compact editorial admin visual language. */
+#admin-root .fin-dashboard{display:grid;gap:18px;min-width:0;}
+#admin-root .fin-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+#admin-root .fin-periods{display:flex;align-items:center;flex-wrap:wrap;gap:7px;}
+#admin-root .fin-periods .admin-button{min-height:36px;}
+#admin-root .fin-filters{display:flex;flex-wrap:wrap;align-items:end;gap:12px;padding:18px 20px;background:#fffdfa;border:1px solid #e3e5d9;border-radius:8px;}
+#admin-root .fin-filters label{display:grid;gap:6px;color:#5a6756;font-size:12px;font-weight:500;}
+#admin-root .fin-filters .fin-search{flex:1;min-width:180px;}
+#admin-root .fin-filters input,#admin-root .fin-filters select{width:100%;min-height:40px;box-sizing:border-box;border:1px solid #d5dcce;border-radius:5px;background:white;color:#3f4f3d;padding:9px 11px;font:inherit;font-size:12px;}
+#admin-root .fin-filters input[type=date]{min-width:142px;}
+#admin-root .fin-filters>button{min-height:40px;}
+#admin-root .fin-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;}
+#admin-root .fin-kpi{background:#fffefa;border:1px solid #e0e5d9;border-radius:8px;min-height:105px;padding:18px 16px;display:flex;flex-direction:column;justify-content:space-between;gap:15px;}
+#admin-root .fin-kpi span{font-size:11px;color:#7b8775;}
+#admin-root .fin-kpi strong{font-size:20px;font-weight:600;line-height:1.25;color:#465d3e;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;}
+#admin-root .fin-panel{border:1px solid #e0e5d9;background:#fffefa;border-radius:9px;padding:20px;min-width:0;}
+#admin-root .fin-panel h2{font-size:16px;line-height:1.5;color:#3e4e39;font-weight:600;margin:0;}
+#admin-root .fin-panel>p{font-size:12px;line-height:1.8;color:#75816e;}
+#admin-root .fin-section-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:20px;}
+#admin-root .fin-section-head p{font-size:11px;color:#879181;margin:5px 0 0;}
+#admin-root .fin-bars{display:grid;gap:12px;padding:3px 0;}
+#admin-root .fin-bar-row{display:grid;grid-template-columns:95px minmax(0,1fr) 110px;gap:15px;align-items:center;font-size:11px;color:#65715d;}
+#admin-root .fin-bar-row b{text-align:right;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;color:#405a3f;}
+#admin-root .fin-bar-track{height:11px;background:#eef1e8;border-radius:30px;overflow:hidden;}
+#admin-root .fin-bar-track>span{display:block;height:100%;border-radius:30px;background:linear-gradient(90deg,#9bb491,#556f52);min-width:2px;}
+#admin-root .fin-panel .finance-table{min-width:800px;}
+#admin-root .fin-page{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:16px;}
+#admin-root .fin-page span{margin-right:8px;font-size:12px;color:#687763;font-variant-numeric:tabular-nums;}
+#admin-root .fin-empty{color:#929c88;font-size:12px;padding:20px 0;text-align:center;}
+#admin-root .fin-audit summary{cursor:pointer;font-size:12px;color:#6d7563;font-weight:600;}
+#admin-root .fin-audit p{font-size:11px;color:#778675;}
+#admin-root .fin-footnote{font-size:11px;color:#7d8b76;padding:6px 0;}
+#admin-root .fin-confirm{border:1px solid #cbd8be;background:#f1f5ec;border-radius:7px;padding:17px 18px;margin-top:18px;}
+#admin-root .fin-confirm strong{display:block;color:#3a5439;font-size:14px;}
+#admin-root .fin-confirm p{font-size:12px;line-height:1.7;color:#607258;margin:8px 0 14px;}
+#admin-root .fin-confirm button+button{margin-left:8px;}
+#admin-root .fin-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:20px 0;}
+#admin-root .fin-split>div{background:#eef1e8;border-radius:8px;display:grid;gap:12px;padding:24px;}
+#admin-root .fin-split span{font-size:12px;color:#6c8069;}
+#admin-root .fin-split strong{font-size:32px;font-weight:600;color:#4b6a47;}
+@media(max-width:1180px){#admin-root .fin-kpis{grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media(max-width:760px){
+ #admin-root .fin-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}
+ #admin-root .fin-kpi{padding:14px;min-height:90px;}
+ #admin-root .fin-kpi strong{font-size:17px;}
+ #admin-root .fin-panel{padding:14px;}
+ #admin-root .fin-filters{padding:12px;}
+ #admin-root .fin-bar-row{grid-template-columns:72px minmax(0,1fr) 90px;gap:8px;font-size:10px;}
+ #admin-root .fin-bar-row b{font-size:10px;}
+}
+@media(max-width:450px){#admin-root .fin-kpis{grid-template-columns:1fr 1fr;gap:8px;}#admin-root .fin-kpi strong{font-size:15px;}#admin-root .fin-bar-row{grid-template-columns:65px minmax(0,1fr) 70px;}}
