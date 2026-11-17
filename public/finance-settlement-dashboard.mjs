@@ -155,6 +155,7 @@ export function mountSettlementDashboard(target){
    const f=new FormData(event.currentTarget);
    void mutate({action:'transitionSettlement',id:state.detailId,status:'confirmed',acknowledged:f.get('acknowledged')==='on'});
   });
+  body.querySelector('[data-settle-return]')?.addEventListener('submit',event=>{event.preventDefault();void mutate({action:'transitionSettlement',id:state.detailId,status:'review',acknowledged:new FormData(event.currentTarget).get('acknowledged')==='on'});});
   body.querySelector('[data-settle-pay]')?.addEventListener('submit',event=>{
    event.preventDefault();
    const f=new FormData(event.currentTarget),confirmed=f.get('acknowledged')==='on';
@@ -202,19 +203,23 @@ export function mountSettlementDashboard(target){
    ['생성일','작가','정산번호','판매 기록액','작가 지급 예정','처리 상태','관리'].map(x=>'<th>'+x+'</th>').join('')+'</tr></thead><tbody>'+
    page.rows.map(b=>'<tr><td>'+E(kstDay(b.createdAt))+'</td><td>'+E(b.sellerName||b.sellerUid)+'</td><td>'+
     E(b.id||b._docId)+'</td><td>'+E(money(b.amount))+'</td><td>'+E(money(b.payout))+'</td><td>'+
-    E(statusLabel(b.status))+'</td><td>'+btn(b.status==='review'?'정산서 검토':b.status==='confirmed'?'지급 완료 처리':'정산서 보기','data-settle-detail="'+E(b.id||b._docId)+'"')+'</td></tr>').join('')+
+    E(statusLabel(b.status))+'</td><td>'+btn(b.status==='review'?'정산서 검토':b.status==='confirmed'?'최종 정산서 보기':'정산서 보기','data-settle-detail="'+E(b.id||b._docId)+'"')+'</td></tr>').join('')+
    (page.rows.length?'':'<tr><td colspan="7">선택한 기간에 정산서가 없습니다.</td></tr>')+'</tbody></table></div>'+
    pagination(page,'batch')+'<p class="admin-notice">정산서 상세에서 배분액과 원본 판매를 검토하고 처리할 수 있습니다. 실제 은행 송금은 별도로 진행해야 합니다.</p></section>';
  }
  function detailContent(batch){
   if(!batch)return '';
-  const id=batch.id||batch._docId,amount=Number(batch.amount||0),actual=Number(batch.payout||0);
+  const id=batch.id||batch._docId,actual=Number(batch.payout||0);
+  const refs=String(batch.saleIds||'').split(',').map(x=>x.trim()).filter(Boolean);
+  const original=refs.map(x=>sales.find(s=>[s._docId,s.sourceSaleId,'d1_'+s.sourceSaleId,s.orderId].includes(x)));
+  const complete=refs.length>0&&original.every(x=>x&&x.sellerUid===batch.sellerUid&&Number.isSafeInteger(x.amount));
+  const amount=batch.source==='legacy-d1'&&batch.rateBasis!=='reviewed-historical'&&complete?original.reduce((n,x)=>n+x.amount,0):Number(batch.amount||0);
   const rate=Number.isInteger(batch.sellerBps)&&batch.sellerBps>=0?batch.sellerBps:7000;
   const calculated=Math.floor(amount*rate/10000),platform=amount-calculated;
   const legacy=batch.source==='legacy-d1';
   const unreviewedLegacy=legacy&&batch.rateBasis!=='reviewed-historical';
   const ids=String(batch.saleIds||'').split(',').map(x=>x.trim()).filter(Boolean);
-  const matched=ids.map(x=>sales.find(s=>[s._docId,s.sourceSaleId,'d1_'+s.sourceSaleId,s.orderId].includes(x)));
+  const matched=Array.isArray(batch.saleSnapshot)?ids.map(id=>batch.saleSnapshot.find(x=>x.id===id)):original;
   const status=E(statusLabel(batch.status));
   const paid=batch.status==='paid';
   const source=legacy?'과거 이전 정산서':'Firebase 거래 정산서';
@@ -231,9 +236,10 @@ export function mountSettlementDashboard(target){
    '<form data-settle-pay><p>실제 은행 이체를 완료한 경우에만 지급 완료로 변경합니다.</p>'+
    '<label>입금·이체 증빙번호<input type="text" name="paymentReference" minlength="4" maxlength="120" required placeholder="이체 확인번호"></label>'+
    '<label><input type="checkbox" name="acknowledged" required> 실제 지급을 완료하고 확인했습니다.</label>'+
-   '<button type="submit" class="admin-button primary">실제 지급 완료 기록</button></form>':'';
+   '<button type="submit" class="admin-button primary">실제 지급 완료 기록</button></form>'+
+   '<form data-settle-return><label><input type="checkbox" name="acknowledged" required> 검토 상태로 되돌리는 데 동의합니다.</label><button type="submit" class="admin-button">검토 상태로 되돌리기</button></form>':'';
   return '<section class="fin-panel fin-statement" data-settle-detail-panel><div class="fin-section-head"><div><h2>'+
-   (paid?'지급 완료 정산서':'정산서 상세·검토')+'</h2><p>'+E(id)+' · '+E(source)+'</p></div>'+
+   (paid?'지급 완료 정산서':batch.status==='confirmed'?'최종 정산서':'정산서 상세·검토')+'</h2><p>'+E(id)+' · '+E(source)+'</p></div>'+
    '<div>'+btn('인쇄·PDF 저장','data-settle-print')+' '+btn('닫기','data-settle-close')+'</div></div>'+
    '<div class="fin-statement-meta"><p><strong>작가</strong> '+E(batch.sellerName||batch.sellerUid)+'</p>'+
    '<p><strong>정산 대상 기간</strong> '+E(batch.from||'—')+' ~ '+E(batch.to||'—')+'</p>'+
@@ -246,8 +252,9 @@ export function mountSettlementDashboard(target){
    '<p><strong>지급 증빙</strong> '+E(batch.paymentReference||'—')+'</p></div>'+
    '<div class="fin-kpis">'+[
     ['판매 기록액',money(amount)],['작가 지급 예정',money(actual)],
-    ['관리자 배분',money(batch.platformShare)],['상태',status]
+    ['관리자 배분',money(unreviewedLegacy&&complete?platform:batch.platformShare)],['상태',status]
    ].map(([label,val])=>'<div class="fin-kpi"><span>'+label+'</span><strong>'+E(val)+'</strong></div>').join('')+'</div>'+
+   (unreviewedLegacy&&!complete?'<p class="admin-notice error">판매 원본이 누락되어 합계를 확인할 수 없습니다. 확인 후 재계산하세요.</p>':'')+
    (legacy?'<p class="admin-notice">과거 원본 지급액 '+E(money(batch.originalPayout??actual))+
     ' · 배분율 '+E(rate/100)+':'+E(100-rate/100)+' 기준 작가 '+E(money(calculated))+
     ' / 관리자 '+E(money(platform))+
@@ -255,7 +262,7 @@ export function mountSettlementDashboard(target){
    '<h3>정산 포함 판매 내역</h3><div class="admin-table-scroll"><table class="admin-members-table"><thead>'+
    '<tr><th>판매번호</th><th>상품</th><th>판매 기록액</th><th>작가 배분액</th></tr></thead><tbody>'+
    ids.map((id,index)=>{const sale=matched[index];return '<tr><td>'+E(id)+'</td><td>'+E(sale?.title||'과거 판매 원본 미연결')+
-    '</td><td>'+E(sale?money(sale.amount):'원본 확인 필요')+'</td><td>'+E(sale?money(sale.sellerShare):'—')+'</td></tr>';}).join('')+
+    '</td><td>'+E(sale?money(sale.amount):'원본 확인 필요')+'</td><td>'+E(sale?money(sale.sellerShare??Math.floor(sale.amount*rate/10000)):'—')+'</td></tr>';}).join('')+
    (ids.length?'':'<tr><td colspan="4">연결된 판매번호가 없습니다. 과거 원본 정산서는 관리자 검토가 필요합니다.</td></tr>')+
    '</tbody></table></div>'+
    reconcile+reviewForm+payForm+
