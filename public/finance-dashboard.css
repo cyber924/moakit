@@ -73,10 +73,11 @@
  #admin-root .fin-statement .fin-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}
 }
 @media print{
- body *{visibility:hidden!important;}
- #admin-root .fin-statement,#admin-root .fin-statement *{visibility:visible!important;}
- #admin-root .fin-statement{position:absolute;inset:0 auto auto 0;width:100%;border:none!important;box-shadow:none!important;background:white!important;box-sizing:border-box;}
- #admin-root .fin-statement button,#admin-root .fin-statement form{display:none!important;}
- #admin-root .fin-statement .admin-table-scroll{overflow:visible!important;}
- #admin-root .fin-statement table{min-width:0!important;width:100%!important;}
+ body:has(.fin-statement) *{visibility:hidden!important;}
+ body:has(.fin-statement) .fin-statement,body:has(.fin-statement) .fin-statement *{visibility:visible!important;}
+ body:has(.fin-statement) .fin-statement{position:absolute!important;top:0!important;left:0!important;width:100%!important;margin:0!important;padding:12mm!important;border:0!important;box-shadow:none!important;background:white!important;box-sizing:border-box!important;}
+ body:has(.fin-statement) .fin-statement button,body:has(.fin-statement) .fin-statement form{display:none!important;}
+ body:has(.fin-statement) .fin-statement .admin-table-scroll,body:has(.fin-statement) .fin-statement .seller-finance-scroll{overflow:visible!important;}
+ body:has(.fin-statement) .fin-statement table{min-width:0!important;width:100%!important;}
+ body:has(.fin-statement) #account-root,body:has(.fin-statement) #admin-root{position:static!important;overflow:visible!important;min-height:0!important;}
 }
