@@ -90,7 +90,8 @@ test('sales and settlement admin pages use separate Firebase dashboards without 
  assert.match(settlement,/reportableSales/);
  assert.match(settlement,/reconcileTestFinance/);
  assert.match(settlement,/data-settle-create/);
- assert.match(settlement,/\/api\/commerce-finance/);
+ assert.match(settlement,/finance-direct\.mjs/);
+ assert.doesNotMatch(settlement,/\/api\/commerce-finance/);
  assert.match(compatibility,/mountSalesDashboard as mountFirebaseFinanceAdmin/);
  assert.doesNotMatch(compatibility,/importLegacySales|importLegacyKitOrders/);
  assert.match(logic,/currentDocument\.exists=false/);
