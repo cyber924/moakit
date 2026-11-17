@@ -1,3 +1,4 @@
+import {financeAction} from './finance-direct.mjs';
 import {confirmedSales,settlementRecords,testOrders} from './finance-firestore.mjs?v=orders-migration-1';
 import {reconcileTestFinance} from './finance-reconciliation-core.mjs';
 import {csvText} from './finance-export.mjs';
@@ -12,16 +13,7 @@ export function mountSettlementDashboard(target){
  const today=kstDay();
  const state={tab:'batches',period:'month',from:today.slice(0,7)+'-01',to:today,mode:'all',search:'',sellerPage:1,batchPage:1,confirmUid:'',detailId:'',policy:{sellerBps:7000,version:0},policyReady:false,policyError:''};
  let sales=[],orders=[],settlements=[],loaded=false,loading=false,busy=false;
- async function requestFinance(input){
-  const account=window.MoaAccount?.user;if(!account||account.uid!==uid)throw Error('관리자 로그인이 필요합니다.');
-  const response=await fetch('/api/commerce-finance',{method:'POST',headers:{
-   Authorization:'Bearer '+await account.getIdToken(),'Content-Type':'application/json',
-   'X-MOAKIT-FIREBASE-COMMERCE':'1'
-  },body:JSON.stringify(input),signal:AbortSignal.timeout(40000)});
-  const result=await response.json().catch(()=>({}));
-  if(!response.ok)throw Error(result.error||'정산 서버 요청 오류 ('+response.status+')');
-  return result;
- }
+ async function requestFinance(input){if(!live())throw Error('관리자 로그인이 필요합니다.');return financeAction(input);}
  function statusMessage(text){
   const slot=target.querySelector('[data-settle-status]');
   if(slot)slot.textContent=text;
@@ -64,13 +56,20 @@ export function mountSettlementDashboard(target){
   catch(error){body.innerHTML='<p class="admin-notice error" role="alert">'+E(error.message)+'</p>';return;}
   const {from,to}=range,all=reconcileTestFinance(sales,settlements);
   const eligible=rowsInPeriod(reportableSales(all.eligible,orders),from,to,state.mode,'all',state.search);
-  const groups=sellerGroups(eligible);
+  const groups=sellerGroups(eligible).map(g=>{const payout=Math.floor(g.amount*state.policy.sellerBps/10000);return {...g,payout,platform:g.amount-payout};});
   const blockedCount=reportableSales(all.blocked.map(x=>x.sale),orders).length;
   const matching=settlements.filter(s=>{
    const d=kstDay(s.createdAt);
    if(!d||d<from||d>to||(state.mode!=='all'&&s.mode!==state.mode))return false;
    const q=state.search.toLocaleLowerCase();
    return !q||[s.sellerName,s.sellerUid,s.id].some(x=>String(x||'').toLocaleLowerCase().includes(q));
+  }).map(b=>{
+   if(b.status!=='review'||b.source!=='legacy-d1'||b.rateBasis==='reviewed-historical')return b;
+   const ids=String(b.saleIds||'').split(',').map(x=>x.trim()).filter(Boolean);
+   const rows=ids.map(id=>sales.find(s=>[s._docId,s.sourceSaleId,'d1_'+s.sourceSaleId,s.orderId].includes(id)));
+   if(!ids.length||rows.some(x=>!x||x.sellerUid!==b.sellerUid||!Number.isSafeInteger(x.amount)))return b;
+   const amount=rows.reduce((n,x)=>n+x.amount,0),bps=Number.isInteger(b.sellerBps)&&b.sellerBps>=0?b.sellerBps:state.policy.sellerBps;
+   const payout=Math.floor(amount*bps/10000);return {...b,amount,payout,platformShare:amount-payout};
   }).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   const pending=groups.reduce((n,g)=>n+g.payout,0),reviewing=matching.filter(s=>s.status==='review').length,
    confirmed=matching.filter(s=>s.status==='confirmed').length,
@@ -92,7 +91,7 @@ export function mountSettlementDashboard(target){
    '<option value="live"'+(state.mode==='live'?' selected':'')+'>실거래 입력분</option></select></label>'+
    '<label class="fin-search">작가·정산번호 검색<input name="search" maxlength="100" value="'+E(state.search)+'" placeholder="작가명·UID"></label>'+
    '<button class="admin-button primary" type="submit">조회</button></form>'+
-   (!state.policyReady?'<p class="admin-notice error">정산서 상태 변경·배분율 저장을 사용하려면 최신 Firebase Functions 배포가 필요합니다. '+E(state.policyError)+'</p>':'')+
+   (!state.policyReady?'<p class="admin-notice error">정산서 상태 변경·배분율 저장을 사용하려면 Firestore 정산 규칙을 확인해주세요. '+E(state.policyError)+'</p>':'')+
    '<p class="admin-notice">정산 검토 대상과 지급 기록을 표시합니다. 미청구 기록은 확정 매출이 아니며, 정산 검토서를 생성해도 실제 송금되지 않습니다.'+
     ' · Firebase 주문 연결 완료 판매만 집계 · 조회 기간 '+E(from)+' ~ '+E(to)+(sales.length>=1000||settlements.length>=1000?' · 최대 1,000건 조회 결과입니다. 전체 누적 집계가 아닐 수 있습니다.':'')+'</p>'+
    '<div class="fin-kpis">'+[
@@ -171,11 +170,11 @@ export function mountSettlementDashboard(target){
    '<form class="fin-filters" data-settle-policy-form><label>작가 배분율 (%)'+
    '<input type="number" name="sellerPercent" min="0" max="100" step="1" value="'+seller+'" required></label>'+
    '<div><strong>자동 계산: 작가 '+seller+'% / 플랫폼 '+platform+'%</strong>'+
-   '<p>예: 80을 입력하면 80:20입니다. 새 비율은 저장 이후 발생하는 거래에만 적용됩니다.</p></div>'+
+   '<p>예: 80을 입력하면 80:20입니다. 새 비율은 이후 생성하는 정산서에 적용됩니다. 확정된 정산서는 유지됩니다.</p></div>'+
    '<button type="submit" class="admin-button primary"'+(state.policyReady?'':' disabled')+'>배분율 저장</button></form>'+
    '<p>저장된 버전 '+E(state.policy.version)+' · 마지막 변경 '+E(state.policy.updatedAt||'최초 설정 전')+'</p>'+
-   (state.policyReady?'':'<p class="admin-notice error">Firebase Functions 재배포가 필요합니다. '+E(state.policyError)+'</p>')+
-   '<p class="admin-notice">기존 정산서의 지급 금액은 비율 변경으로 소급 수정하지 않습니다. 기존 도안·KIT 판매에는 거래 당시 배분액이 보존됩니다. 이전 정산서의 비율 차이는 해당 정산서 상세에서 명시적으로 검토할 수 있습니다.</p></section>';
+   (state.policyReady?'':'<p class="admin-notice error">Firestore 정산 규칙을 확인해주세요. '+E(state.policyError)+'</p>')+
+   '<p class="admin-notice">기존 정산서의 지급 금액은 비율 변경으로 소급 수정하지 않습니다. 검토 중 정산서는 상세 화면에서 배분율을 조정할 수 있습니다. 이전 정산서의 비율 차이는 해당 정산서 상세에서 명시적으로 검토할 수 있습니다.</p></section>';
  }
  function sellerContent(page,from,to){
   return '<section class="fin-panel"><div class="fin-section-head"><div><h2>작가별 정산 예정 현황</h2><p>정산 검토 가능 거래만 집계 · 총 '+page.total+'명 · 20명씩 보기</p></div>'+
@@ -214,22 +213,22 @@ export function mountSettlementDashboard(target){
   const original=refs.map(x=>sales.find(s=>[s._docId,s.sourceSaleId,'d1_'+s.sourceSaleId,s.orderId].includes(x)));
   const complete=refs.length>0&&original.every(x=>x&&x.sellerUid===batch.sellerUid&&Number.isSafeInteger(x.amount));
   const amount=batch.source==='legacy-d1'&&batch.rateBasis!=='reviewed-historical'&&complete?original.reduce((n,x)=>n+x.amount,0):Number(batch.amount||0);
-  const rate=Number.isInteger(batch.sellerBps)&&batch.sellerBps>=0?batch.sellerBps:7000;
+  const rate=Number.isInteger(batch.sellerBps)&&batch.sellerBps>=0?batch.sellerBps:state.policy.sellerBps;
   const calculated=Math.floor(amount*rate/10000),platform=amount-calculated;
   const legacy=batch.source==='legacy-d1';
   const unreviewedLegacy=legacy&&batch.rateBasis!=='reviewed-historical';
   const ids=String(batch.saleIds||'').split(',').map(x=>x.trim()).filter(Boolean);
-  const matched=Array.isArray(batch.saleSnapshot)?ids.map(id=>batch.saleSnapshot.find(x=>x.id===id)):original;
+  const matched=Array.isArray(batch.saleSnapshot)?ids.map(id=>batch.saleSnapshot.find(x=>x?.id===id)):original;
   const status=E(statusLabel(batch.status));
   const paid=batch.status==='paid';
   const source=legacy?'과거 이전 정산서':'Firebase 거래 정산서';
   const reviewForm=batch.status==='review'&&!unreviewedLegacy?
    '<form data-settle-confirm><label><input type="checkbox" name="acknowledged" required> 정산서 금액 및 중복 여부를 검토했고 확정에 동의합니다.</label>'+
    '<button class="admin-button primary" type="submit">검토 완료 · 정산 확정</button></form>':'';
-  const reconcile=unreviewedLegacy?
-   '<form data-settle-reconcile><p><strong>과거 정산서 배분액 확인 필요</strong></p>'+
+  const reconcile=batch.status==='review'?
+   '<form data-settle-reconcile><p><strong>정산서 배분율 조정</strong></p>'+
    '<p>원본 지급 예정액 '+E(money(actual))+'을 보존하고 선택한 비율로 재계산합니다. 과거 실제 지급 사실을 의미하지 않습니다.</p>'+
-   '<label>적용할 작가 배분율 (%) <input type="number" name="sellerPercent" min="0" max="100" step="1" value="'+E(state.policy.sellerBps/100)+'" required></label>'+
+   '<label>적용할 작가 배분율 (%) <input type="number" name="sellerPercent" min="0" max="100" step="1" value="'+E(rate/100)+'" required></label>'+
    '<label><input type="checkbox" name="acknowledged" required> 원본 지급 예정액과 재계산 차이를 확인했습니다.</label>'+
    '<button class="admin-button primary" type="submit">원본 보존 · 배분율 재계산</button></form>':'';
   const payForm=batch.status==='confirmed'?
@@ -251,7 +250,7 @@ export function mountSettlementDashboard(target){
    '<p><strong>지급 완료일</strong> '+E(batch.paidAt||'—')+'</p>'+
    '<p><strong>지급 증빙</strong> '+E(batch.paymentReference||'—')+'</p></div>'+
    '<div class="fin-kpis">'+[
-    ['판매 기록액',money(amount)],['작가 지급 예정',money(actual)],
+    ['판매 기록액',money(amount)],['작가 지급 예정',money(unreviewedLegacy&&complete?calculated:actual)],
     ['관리자 배분',money(unreviewedLegacy&&complete?platform:batch.platformShare)],['상태',status]
    ].map(([label,val])=>'<div class="fin-kpi"><span>'+label+'</span><strong>'+E(val)+'</strong></div>').join('')+'</div>'+
    (unreviewedLegacy&&!complete?'<p class="admin-notice error">판매 원본이 누락되어 합계를 확인할 수 없습니다. 확인 후 재계산하세요.</p>':'')+
@@ -293,13 +292,7 @@ export function mountSettlementDashboard(target){
   busy=true;
   target.querySelectorAll('[data-settle-create],[data-settle-choose]').forEach(b=>b.disabled=true);
   try{
-   const user=window.MoaAccount?.user;if(!user)throw Error('관리자 계정이 필요합니다.');
-   const response=await fetch('/api/commerce-finance',{method:'POST',headers:{
-    Authorization:'Bearer '+await user.getIdToken(),'Content-Type':'application/json','X-MOAKIT-FIREBASE-COMMERCE':'1'
-   },body:JSON.stringify({action:'createSettlement',sellerUid:g.uid,sellerName:g.name,
-    from,to,saleIds:g.rows.map(s=>s._docId||s.orderId)}),signal:AbortSignal.timeout(40000)});
-   const data=await response.json().catch(()=>({}));
-   if(!response.ok)throw Error(data.error||'정산 검토서 생성 실패');
+   await requestFinance({action:'createSettlement',sellerUid:g.uid,sellerName:g.name,from,to,saleIds:g.rows.map(s=>s._docId||s.orderId)});
    state.confirmUid='';state.tab='batches';await load();
   }catch(error){
    if(status)status.textContent=String(error.message||error);
