@@ -2,6 +2,7 @@ export const PROFILE_COLLECTION='moakitUsers';
 export function encodeValue(value){
  if(value===null)return {nullValue:null};
  if(Array.isArray(value))return {arrayValue:{values:value.map(encodeValue)}};
+ if(typeof value==='object')return {mapValue:{fields:Object.fromEntries(Object.entries(value).map(([key,item])=>[key,encodeValue(item)]))}};
  if(typeof value==='boolean')return {booleanValue:value};
  if(typeof value==='number')return Number.isInteger(value)?{integerValue:String(value)}:{doubleValue:value};
  return {stringValue:String(value)};
@@ -13,6 +14,7 @@ export function decodeValue(value){
  if('integerValue' in value)return Number(value.integerValue);
  if('doubleValue' in value)return value.doubleValue;
  if('arrayValue' in value)return (value.arrayValue.values||[]).map(decodeValue);
+ if('mapValue' in value)return Object.fromEntries(Object.entries(value.mapValue.fields||{}).map(([key,item])=>[key,decodeValue(item)]));
  return null;
 }
 export const encodeFields=data=>Object.fromEntries(Object.entries(data).filter(([,v])=>v!==undefined).map(([key,value])=>[key,encodeValue(value)]));
