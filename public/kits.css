@@ -15,3 +15,4 @@
 #kit-root>.kit-list-breadcrumb{padding-bottom:12px}
 #kit-root>.kit-catalog-heading{padding-top:0;padding-bottom:18px}
 #kit-root>.kit-catalog-heading h1{font-size:32px;margin:5px 0 7px}
+.kit-order-period{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}.kit-order-period form{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.kit-order-period label{font-size:12px}.kit-order-period input{display:block;padding:7px;border:1px solid #ddd2bd}.kit-order-period p{font-size:12px;margin-left:auto}.kit-order-admin>article{padding:12px 16px;margin-bottom:10px}.kit-order-admin .kit-order-items>div{padding:7px 0}.kit-order-admin .kit-order-items img{width:42px;height:52px}.kit-order-admin .kit-order-total{margin:7px 0}.kit-order-admin details{margin:7px 0}.kit-order-pages{text-align:center;margin:18px}
