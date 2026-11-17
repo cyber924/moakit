@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {
  kstDay,periodWindow,pageSlice,rowsInPeriod,salesTotals,trendRows,sellerGroups,orderGap,reportableSales
 } from '../public/finance-dashboard-core.mjs';
@@ -65,4 +66,19 @@ test('existing Firebase KIT order ID is accepted without duplicate kit_ prefix',
  const accepted=reportableSales([kit],[{id:'kit_order10'}]);
  assert.equal(accepted.length,1);
  assert.equal(orderGap([kit],[{id:'kit_order10'}]).length,0);
+});
+
+test('settlement UI displays existing batches, controls and configurable rate independently',()=>{
+ const ui=readFileSync(new URL('../public/finance-settlement-dashboard.mjs',import.meta.url),'utf8');
+ assert.match(ui,/documentedSellers/);
+ assert.match(ui,/matching\.length\+'건'/);
+ assert.match(ui,/data-settle-detail/);
+ assert.match(ui,/data-settle-policy-form/);
+ assert.match(ui,/action:'setPolicy'/);
+ assert.match(ui,/action:'reconcileLegacy'/);
+ assert.match(ui,/action:'transitionSettlement'/);
+ assert.match(ui,/paymentReference/);
+ assert.match(ui,/data-settle-print/);
+ assert.match(ui,/지급 완료 내역/);
+ assert.doesNotMatch(ui,/\/api\/finance['"]/);
 });

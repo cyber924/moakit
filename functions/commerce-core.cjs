@@ -3,11 +3,15 @@ const {createHash} = require('node:crypto');
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const validId=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(s);
 const amount=n=>Number.isSafeInteger(n)&&n>=0&&n<=100000000;
-function revenue7030(n){
- if(!amount(n))throw fail('정산 금액이 유효하지 않습니다.');
- const seller=Math.floor(n*7/10);
+// 10,000 basis points = 100%; all calculations use integer won.
+function revenueSplit(n,sellerBps=7000){
+ if(!amount(n)||!Number.isInteger(sellerBps)||sellerBps<0||sellerBps>10000)
+  throw fail('정산 금액 또는 배분율이 유효하지 않습니다.');
+ // Multiplication is exact under the supported 100,000,000 won amount cap.
+ const seller=Math.floor(n*sellerBps/10000);
  return {seller,platform:n-seller,total:n};
 }
+function revenue7030(n){return revenueSplit(n,7000);}
 function shippingInput(data){
  const spec={name:40,phone:30,postal:10,address:200,detail:100,memo:300},out={};
  for(const [key,max] of Object.entries(spec)){
@@ -65,9 +69,9 @@ function checkoutFingerprint(uid,checkoutKey,lines,shipping){
   color:x.color,extras:[...x.extras].sort()})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
  return createHash('sha256').update(JSON.stringify({uid,checkoutKey,lines:canonical,shipping})).digest('hex');
 }
-function sellerSplit(line){
+function sellerSplit(line,sellerBps=7000){
  if(line.financeSellerUid==='__platform__')return {seller:0,platform:line.subtotal,total:line.subtotal};
- return revenue7030(line.subtotal);
+ return revenueSplit(line.subtotal,sellerBps);
 }
 function refunded(sale){
  return sale?.status==='cancelled'||sale?.status==='void'
@@ -79,4 +83,4 @@ function isTrustedPatternSale(sale,uid,id){
   &&['firebase-transaction','legacy-d1-finance','legacy-pattern-purchase'].includes(sale.verifiedSource)
   &&['reviewed','settled-in-work'].includes(sale.status);
 }
-module.exports={fail,validId,amount,revenue7030,shippingInput,itemIds,kitSoldOut,kitQuote,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale};
+module.exports={fail,validId,amount,revenueSplit,revenue7030,shippingInput,itemIds,kitSoldOut,kitQuote,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale};

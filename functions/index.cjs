@@ -8,13 +8,14 @@ const {getFirestore,FieldValue}=require('firebase-admin/firestore');
 const {getStorage}=require('firebase-admin/storage');
 const {createHash,randomUUID}=require('node:crypto');
 const core=require('./commerce-core.cjs');
-const {fail,validId,amount,revenue7030,shippingInput,itemIds,kitQuote,kitSoldOut,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale}=core;
+const {fail,validId,amount,revenueSplit,revenue7030,shippingInput,itemIds,kitQuote,kitSoldOut,checkoutFingerprint,sellerSplit,refunded,isTrustedPatternSale}=core;
 if(!getApps().length)initializeApp({storageBucket:'studio-1613487721-b043c.firebasestorage.app'});
 const db=getFirestore(),bucket=getStorage().bucket();
 const now=()=>new Date().toISOString();
 const collections={kits:'moakitKits',orders:'moakitOrders',sales:'moakitSales',private:'moakitOrderPrivate',
  patterns:'moakitPatterns',settlements:'moakitSettlements'};
 const ref=(col,id)=>db.collection(col).doc(id);
+const financeOperations=require('./finance-operations.cjs')({db,ref,now,json,fail,amount,revenueSplit,validId});
 const once=async col=>{const snap=await db.collection(col).limit(1001).get();
  if(snap.size>=1000)throw fail('현재 목록의 조회 한도를 초과했습니다. 관리자에게 문의해주세요.',503);
  return snap.docs.map(d=>({...d.data(),_docId:d.id}));
@@ -206,14 +207,15 @@ async function getKits(ids,tx){
  const snaps=await Promise.all(ids.map(id=>tx?tx.get(ref(collections.kits,id)):ref(collections.kits,id).get()));
  return snaps.map(parseKit);
 }
-function kitSales(orderId,buyerUid,items,timestamp){
+function kitSales(orderId,buyerUid,items,timestamp,policy){
  return items.map((line,i)=>{
-  const payout=sellerSplit(line),id='fc_'+orderId+'_'+i;
+  const payout=sellerSplit(line,policy.sellerBps),id='fc_'+orderId+'_'+i;
   return {id,orderId,sourceOrderId:orderId,buyerUid,
    sellerUid:line.financeSellerUid,sellerName:line.financeSellerName,
    kind:'kit',title:line.title,productId:line.id,quantity:line.quantity,amount:line.subtotal,
    net:line.subtotal,refund:0,discount:0,sellerShare:payout.seller,
-   platformShare:payout.platform,mode:'test',charged:0,status:'reviewed',
+   platformShare:payout.platform,sellerBps:line.financeSellerUid==='__platform__'?0:policy.sellerBps,
+   policyVersion:policy.version,mode:'test',charged:0,status:'reviewed',
    createdAt:timestamp,reviewedAt:timestamp,verifiedSource:'firebase-transaction'};
  });
 }
@@ -237,7 +239,8 @@ async function checkoutKit(user,input,res,{diagnostic=false}={}){
  const fingerprint=checkoutFingerprint(user.uid,input.checkoutKey,input.items,shipping);
  const orderRef=ref(collections.orders,id),privateRef=ref(collections.private,id);
  const result=await db.runTransaction(async tx=>{
-  const old=await tx.get(orderRef);
+  const [old,policySnap]=await Promise.all([tx.get(orderRef),tx.get(ref('moakitSettings','finance'))]);
+  const policy=financeOperations.policyFromDoc(policySnap);
   if(old.exists){
    const previous=old.data();
    if(previous.buyerUid!==user.uid||previous.source!=='firebase-checkout'||previous.checkoutFingerprint!==fingerprint)
@@ -259,7 +262,7 @@ async function checkoutKit(user,input,res,{diagnostic=false}={}){
   tx.create(privateRef,{buyerUid:user.uid,shipping,createdAt:timestamp});
   for(const kit of kits)tx.update(ref(collections.kits,kit.id),{
    salesCount:FieldValue.increment(quote.quantities[kit.id])});
-  for(const sale of kitSales(id,user.uid,quote.items,timestamp))tx.create(ref(collections.sales,sale.id),sale);
+  for(const sale of kitSales(id,user.uid,quote.items,timestamp,policy))tx.create(ref(collections.sales,sale.id),sale);
   return {order:receipt,existing:false};
  },{maxAttempts:5});
  return json(res,{order:orderView(result.order,shipping)},result.existing?200:201);
@@ -426,7 +429,8 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
  const storedFile=await patternFile(product);
  const orderRef=ref(collections.orders,patternId(user.uid,id)),saleRef=ref(collections.sales,patternId(user.uid,id));
  const order=await db.runTransaction(async tx=>{
-  const old=await tx.get(orderRef),oldSale=await tx.get(saleRef),nowProduct=await tx.get(product.snap.ref);
+  const [old,oldSale,nowProduct,policySnap]=await Promise.all([tx.get(orderRef),tx.get(saleRef),tx.get(product.snap.ref),tx.get(ref('moakitSettings','finance'))]);
+  const policy=financeOperations.policyFromDoc(policySnap);
   if(old.exists||oldSale.exists){
    if(old.exists&&old.data().buyerUid===user.uid&&old.data().verification==='verified'&&oldSale.exists
     &&isTrustedPatternSale(oldSale.data(),user.uid,id))return old.data();
@@ -436,7 +440,7 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
   if(!listing||!(listing.status==='published'||diagnostic&&listing.status==='diagnostic'&&id.startsWith('diag_'))||listing.content!==product.listing.content
    ||listing.sellerUid!==product.listing.sellerUid||listing.sourceId!==product.listing.sourceId)
    throw fail('도안 가격 또는 공개 상태가 변경됐습니다.',409);
-  const time=now(),parts=revenue7030(product.price);
+  const time=now(),parts=revenueSplit(product.price,policy.sellerBps);
   const receipt={id:orderRef.id,kind:'pattern',buyerUid:user.uid,sourceOrderId:id,
    productId:id,sellerUid:listing.sellerUid,sellerName:String(product.content.sellerName||'작가').slice(0,80),
    title:String(product.content.title||'도안').slice(0,150),amount:product.price,
@@ -447,7 +451,8 @@ async function buyPattern(user,id,res,{diagnostic=false}={}){
   const sale={id:saleRef.id,orderId:orderRef.id,sourceOrderId:id,buyerUid:user.uid,
    sellerUid:receipt.sellerUid,sellerName:receipt.sellerName,kind:'pattern',title:receipt.title,
    productId:id,amount:parts.total,net:parts.total,refund:0,discount:0,
-   sellerShare:parts.seller,platformShare:parts.platform,quantity:1,
+   sellerShare:parts.seller,platformShare:parts.platform,sellerBps:policy.sellerBps,
+   policyVersion:policy.version,quantity:1,
    mode:'test',charged:0,status:'reviewed',createdAt:time,reviewedAt:time,
    verifiedSource:'firebase-transaction'};
   tx.create(orderRef,receipt);tx.create(saleRef,sale);
@@ -528,7 +533,7 @@ async function patternRoute(req,res){
 async function financeRoute(req,res){
  if(req.method!=='POST')throw fail('POST 요청만 허용합니다.',405);
  const user=await adminSession(req),input=req.body||{};
- if(input.action!=='createSettlement')throw fail('지원하지 않는 정산 기능입니다.');
+ if(input.action!=='createSettlement')return financeOperations.route(res,user,input);
  const {sellerUid,sellerName,from,to}=input,ids=input.saleIds;
  if(!validId(sellerUid)||!Array.isArray(ids)||ids.length<1||ids.length>100
   ||ids.some(x=>typeof x!=='string'||!/^[A-Za-z0-9_-]{1,450}$/.test(x))||new Set(ids).size!==ids.length
@@ -553,7 +558,9 @@ async function financeRoute(req,res){
   if(!amount(amountTotal)||!amount(payout))throw fail('정산 금액이 올바르지 않습니다.',409);
   const doc={id:settleRef.id,sellerUid,sellerName:String(sellerName||'작가').slice(0,80),
    from,to,saleIds:sorted.join(','),amount:amountTotal,payout,platformShare:amountTotal-payout,
-   mode:'test',status:'review',paid:0,createdAt:now(),createdBy:user.uid,source:'firebase-transaction'};
+   mode:'test',status:'review',paid:0,createdAt:now(),createdBy:user.uid,source:'firebase-transaction',
+   sellerBps:rows.every(x=>Number.isInteger(x.sellerBps)&&x.sellerBps===rows[0].sellerBps)?rows[0].sellerBps:-1,
+   rateBasis:'sale-snapshot',version:1};
   tx.create(settleRef,doc);return doc;
  },{maxAttempts:5});
  return json(res,{settlement:row},201);

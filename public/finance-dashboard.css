@@ -49,3 +49,34 @@
  #admin-root .fin-bar-row b{font-size:10px;}
 }
 @media(max-width:450px){#admin-root .fin-kpis{grid-template-columns:1fr 1fr;gap:8px;}#admin-root .fin-kpi strong{font-size:15px;}#admin-root .fin-bar-row{grid-template-columns:65px minmax(0,1fr) 70px;}}
+
+/* Settlement document details and protected admin transitions. */
+#admin-root .fin-statement{scroll-margin-top:28px;display:grid;gap:16px;}
+#admin-root .fin-statement .fin-section-head{margin-bottom:0;}
+#admin-root .fin-statement .fin-section-head>div:last-child{display:flex;flex-wrap:wrap;gap:8px;}
+#admin-root .fin-statement h3{font-size:14px;color:#455d42;margin:10px 0 0;}
+#admin-root .fin-statement-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:14px 18px;border:1px solid #e1e7dc;border-radius:7px;}
+#admin-root .fin-statement-meta p{margin:0;color:#697865;font-size:12px;overflow-wrap:anywhere;line-height:1.75;}
+#admin-root .fin-statement-meta strong{color:#344d37;margin-right:8px;}
+#admin-root .fin-statement form{display:grid;align-items:start;gap:13px;border-top:1px solid #e5eade;padding:18px 0 4px;max-width:710px;}
+#admin-root .fin-statement form>p{margin:0;line-height:1.7;color:#596d55;font-size:12px;}
+#admin-root .fin-statement form>label{display:flex;align-items:center;flex-wrap:wrap;gap:10px;font-size:12px;line-height:1.7;color:#4b6149;}
+#admin-root .fin-statement form>label>input[type=number],
+#admin-root .fin-statement form>label>input[type=text]{min-height:38px;padding:8px 10px;border:1px solid #ced8c8;border-radius:5px;max-width:100%;}
+#admin-root .fin-statement form>label>input[type=checkbox]{width:17px;height:17px;min-height:0;}
+#admin-root .fin-statement form button{justify-self:start;}
+#admin-root .fin-statement .fin-kpis{grid-template-columns:repeat(4,minmax(0,1fr));}
+#admin-root [data-settle-policy-form] label>input{max-width:130px;}
+#admin-root .fin-dashboard .admin-notice.error{color:#a04537;}
+@media(max-width:750px){
+ #admin-root .fin-statement-meta{grid-template-columns:1fr;}
+ #admin-root .fin-statement .fin-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media print{
+ body *{visibility:hidden!important;}
+ #admin-root .fin-statement,#admin-root .fin-statement *{visibility:visible!important;}
+ #admin-root .fin-statement{position:absolute;inset:0 auto auto 0;width:100%;border:none!important;box-shadow:none!important;background:white!important;box-sizing:border-box;}
+ #admin-root .fin-statement button,#admin-root .fin-statement form{display:none!important;}
+ #admin-root .fin-statement .admin-table-scroll{overflow:visible!important;}
+ #admin-root .fin-statement table{min-width:0!important;width:100%!important;}
+}

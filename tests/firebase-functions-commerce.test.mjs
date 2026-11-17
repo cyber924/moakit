@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import core from '../functions/commerce-core.cjs';
 import {seedKit} from '../public/kit-core.mjs';
-const {revenue7030,kitQuote,checkoutFingerprint,shippingInput,itemIds,refunded,isTrustedPatternSale}=core;
+const {revenue7030,revenueSplit,kitQuote,checkoutFingerprint,shippingInput,itemIds,refunded,isTrustedPatternSale}=core;
 const kit={...structuredClone(seedKit),stock:3,version:7};
 const line={id:kit.id,version:7,quantity:2,size:kit.data.sizes[0],
  color:kit.data.colors[0],extras:[]};
@@ -58,4 +58,15 @@ test('trusted Cloud Function code leaves storage private and settles inside tran
  assert.ok(!fn.includes('getSignedUrl('));
  assert.match(rules,/match \/moakit\/private\/\{uid\}\/\{workId\}\/\{fileName\}/);
  assert.match(rules,/allow get, list: if owner\(uid\) \|\| admin\(\);/);
+});
+
+test('configurable 80:20 rate uses integer won and persists policy version per new sale',()=>{
+ assert.deepEqual(revenueSplit(61600,8000),{seller:49280,platform:12320,total:61600});
+ assert.deepEqual(revenueSplit(61600,7000),{seller:43120,platform:18480,total:61600});
+ assert.throws(()=>revenueSplit(61600,10001));
+ const fn=readFileSync(new URL('../functions/index.cjs',import.meta.url),'utf8');
+ assert.match(fn,/financeOperations\.policyFromDoc\(policySnap\)/);
+ assert.match(fn,/policyVersion:policy\.version/);
+ assert.match(fn,/financeOperations\.route\(res,user,input\)/);
+ assert.match(fn,/revenueSplit\(product\.price,policy\.sellerBps\)/);
 });

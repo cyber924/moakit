@@ -7,7 +7,7 @@ import {mountCreatorsAdmin} from './creators-admin.js';
 import {mountPromotionsAdmin} from './promotions-admin.js';
 import {mountAiContentAdmin} from './ai-content-admin.js';
 import {mountKitAdmin} from './kit-admin.js';
-import {mountFinanceAdmin} from './finance-admin.js?v=finance-ops-20261117';
+import {mountFinanceAdmin} from './finance-admin.js?v=finance-ops-20261117b';
 import {mountAdminOperationsHealth} from './admin-operations-health.mjs';
 import {mountFirebaseCommerceCutover} from './firebase-commerce-cutover-admin.mjs';
 import {isFirebaseAdminLocalAction} from './admin-local-actions.mjs';
