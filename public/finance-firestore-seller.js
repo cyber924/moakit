@@ -19,9 +19,18 @@ export async function mountSellerFirebaseSummary(target,{uid}={}){
    '<div class="seller-finance-scroll"><table class="seller-finance-table"><thead><tr><th>판매일</th><th>상품</th><th>판매액</th><th>작가 몫</th></tr></thead><tbody>'+
    test.slice(0,100).map(s=>'<tr><td>'+E(s.createdAt?.slice(0,10))+'</td><td>'+E(s.title)+'</td><td>'+won(s.amount)+'</td><td>'+won(s.sellerShare)+'</td></tr>').join('')+
    (test.length?'':'<tr><td colspan="4">Firebase에서 조회된 판매 기록이 없습니다.</td></tr>')+
-   '</tbody></table></div><h3>테스트 정산서</h3>'+
-   batches.slice(0,30).map(b=>'<p>'+E(b.from)+' ~ '+E(b.to)+' · '+won(b.payout)+' · '+(b.source==='legacy-d1'?'기존 원장 보관':'검토 중 · 실제 지급 없음')+'</p>').join('')+
-   (batches.length?'':'<p>정산서가 없습니다.</p>');
+   '</tbody></table></div><h3>확정된 정산서</h3>'+
+   batches.filter(b=>['confirmed','paid'].includes(b.status)).map(b=>'<p>'+E(b.from)+' ~ '+E(b.to)+' · '+won(b.payout)+' · '+(b.status==='paid'?'지급 완료':'확정')+' <button class="seller-button" data-seller-statement="'+E(b.id||b._docId)+'">정산서 보기</button></p>').join('')+
+   (batches.some(b=>['confirmed','paid'].includes(b.status))?'':'<p>확정된 정산서가 없습니다.</p>');
+  const listMarkup=node.innerHTML;
+  function bind(){node.querySelectorAll('[data-seller-statement]').forEach(button=>button.onclick=()=>{
+   const b=batches.find(x=>(x.id||x._docId)===button.dataset.sellerStatement);
+   if(!b||!['confirmed','paid'].includes(b.status))return;
+   const rows=Array.isArray(b.saleSnapshot)?b.saleSnapshot:[];
+   node.innerHTML='<section class="fin-statement"><h2>최종 정산서</h2><p>정산번호 '+E(b.id||b._docId)+'</p><p>작가 '+E(b.sellerName||'작가')+' · 정산 기간 '+E(b.from)+' ~ '+E(b.to)+'</p><p>상태 '+(b.status==='paid'?'지급 완료':'확정')+' · 확정일 '+E(b.confirmedAt||'—')+' · 지급일 '+E(b.paidAt||'—')+'</p><p>총 판매액 '+won(b.amount)+' · 작가 지급액 '+won(b.payout)+' · 관리자 배분 '+won(b.platformShare)+'</p><p>배분율 '+(Number.isInteger(b.sellerBps)&&b.sellerBps>=0?E(b.sellerBps/100)+':'+E(100-b.sellerBps/100):'거래별 비율 적용')+'</p><h3>판매 내역</h3><table class="seller-finance-table"><thead><tr><th>상품</th><th>판매액</th></tr></thead><tbody>'+rows.map(x=>'<tr><td>'+E(x.title)+'</td><td>'+won(x.amount)+'</td></tr>').join('')+'</tbody></table>'+(rows.length?'':'<p>저장된 판매 내역이 없습니다. 관리자에게 문의해주세요.</p>')+'<p><button class="seller-button" data-statement-print>인쇄·PDF 저장</button> <button class="seller-button" data-statement-back>목록으로</button></p></section>';
+   node.querySelector('[data-statement-print]').onclick=()=>window.print();
+   node.querySelector('[data-statement-back]').onclick=()=>{node.innerHTML=listMarkup;bind();};
+  });}bind();
  }catch(e){
   if(!node.isConnected)return;
   node.innerHTML='<h2>Firebase 판매·정산 기록</h2><p role="alert" class="admin-notice error">'+E(e.message)+'</p><p>신규 Firebase 컬렉션 접근 규칙을 게시하면 조회할 수 있습니다. 기존 Work 판매 화면은 유지됩니다.</p>';
