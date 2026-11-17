@@ -92,11 +92,10 @@ export async function mirrorTestOrder(kind,receipt){
   return {order:saved,existing:true};
  }
 }
-async function query(collection,field,value,{pageSize=100}={}){
- const queryBody={structuredQuery:{
-  from:[{collectionId:collection}],where:{fieldFilter:{
-   field:{fieldPath:field},op:'EQUAL',value:{stringValue:value}
-  }},limit:pageSize}};
+async function query(collection,field,value,{pageSize=100,confirmedOnly=false}={}){
+ const filter={fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:value}}};
+ const where=confirmedOnly?{compositeFilter:{op:'AND',filters:[filter,{fieldFilter:{field:{fieldPath:'status'},op:'IN',value:{arrayValue:{values:[{stringValue:'confirmed'},{stringValue:'paid'}]}}}}]}}:filter;
+ const queryBody={structuredQuery:{from:[{collectionId:collection}],where,limit:pageSize}};
  const result=await firestore(ROOT+':runQuery',{method:'POST',body:queryBody});
  if(!Array.isArray(result))throw Error('Firebase 거래 조회 형식이 올바르지 않습니다.');
  return result.filter(r=>r.document).map(r=>({...decodeDocument(r.document),_docId:r.document.name.split('/').pop()}));
@@ -131,7 +130,7 @@ export async function confirmedSales({role='admin',uid}={}){
 export async function settlementRecords({role='admin',uid}={}){
  const current=await authToken();
  if(role==='admin')return all(COLLECTIONS.settlements);
- return query(COLLECTIONS.settlements,'sellerUid',uid||current.uid);
+ return query(COLLECTIONS.settlements,'sellerUid',uid||current.uid,{confirmedOnly:true});
 }
 export function splitTestRevenue(amount){
  const total=int(amount);

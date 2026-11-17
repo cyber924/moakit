@@ -195,10 +195,20 @@ owner(resource.data.buyerUid); allow create: if validPending() && (admin() || ow
 request.resource.data.keys().hasAll([ 'orderId','sellerUid','amount','sellerShare', 'platformShare','mode','charged','status','createdAt' ]) && request.resource.data.mode ==
 'test' && request.resource.data.charged == 0 && request.resource.data.status in ['reviewed','settled-in-work'] && request.resource.data.amount is int &&
 request.resource.data.amount >= 0 && request.resource.data.amount <= 100000000 && request.resource.data.sellerShare is int && request.resource.data.platformShare is int &&
-request.resource.data.sellerShare >= 0 && request.resource.data.platformShare >= 0 && request.resource.data.sellerUid is string; allow update, delete: if false; } match
-/moakitSettlements/{settlementId} { allow get, list: if admin() || (signedIn() && resource.data.sellerUid == request.auth.uid); allow create: if admin() &&
-request.resource.data.mode == 'test' && request.resource.data.status == 'review' && request.resource.data.paid == 0 && request.resource.data.sellerUid is string &&
-request.resource.data.payout is int && request.resource.data.payout >= 0; allow update, delete: if false; } match /moakitNotices/{noticeId} { function memberAudience() {
+request.resource.data.sellerShare >= 0 && request.resource.data.platformShare >= 0 && request.resource.data.sellerUid is string; allow update, delete: if false; }match /moakitSettings/finance {
+ allow get: if admin();
+ allow create, update: if admin() && request.resource.data.sellerBps is int && request.resource.data.sellerBps >= 0 && request.resource.data.sellerBps <= 10000 && request.resource.data.sellerBps % 100 == 0 && request.resource.data.version is int && request.resource.data.version >= 1 && request.resource.data.updatedBy == request.auth.uid;
+ allow delete: if false;
+}match /moakitSettlementLocks/{sellerUid} {
+ allow get: if admin();
+ allow create, update: if admin() && request.resource.data.keys().hasOnly(['version','updatedAt','updatedBy']) && request.resource.data.version is int && request.resource.data.version > 0 && request.resource.data.updatedBy == request.auth.uid;
+ allow delete, list: if false;
+}match /moakitSettlements/{settlementId} {
+ allow get, list: if admin() || (signedIn() && resource.data.sellerUid == request.auth.uid && resource.data.status in ['confirmed','paid']);
+ allow create: if admin() && request.resource.data.mode == 'test' && request.resource.data.status == 'review' && request.resource.data.paid == 0 && request.resource.data.sellerUid is string && request.resource.data.amount is int && request.resource.data.payout is int && request.resource.data.platformShare is int && request.resource.data.amount >= 0 && request.resource.data.payout >= 0 && request.resource.data.platformShare >= 0 && request.resource.data.amount == request.resource.data.payout + request.resource.data.platformShare;
+ allow update: if admin() && request.resource.data.updatedBy == request.auth.uid && request.resource.data.sellerUid == resource.data.sellerUid && request.resource.data.saleIds == resource.data.saleIds && request.resource.data.mode == resource.data.mode && request.resource.data.version == resource.data.get('version',0) + 1 && request.resource.data.amount is int && request.resource.data.payout is int && request.resource.data.platformShare is int && request.resource.data.amount >= 0 && request.resource.data.payout >= 0 && request.resource.data.platformShare >= 0 && request.resource.data.amount == request.resource.data.payout + request.resource.data.platformShare && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['amount','payout','platformShare','originalAmount','originalPayout','originalPlatformShare','sellerBps','saleSnapshot','rateBasis','reviewedAt','reviewedBy','updatedAt','updatedBy','version','status','confirmedAt','confirmedBy','returnedAt','returnedBy','paidAt','paidBy','paid','paymentReference']) && ((resource.data.status == 'review' && request.resource.data.status in ['review','confirmed']) || (resource.data.status == 'confirmed' && request.resource.data.status in ['review','paid'] && request.resource.data.amount == resource.data.amount && request.resource.data.payout == resource.data.payout && request.resource.data.platformShare == resource.data.platformShare));
+ allow delete: if false;
+} match /moakitNotices/{noticeId} { function memberAudience() {
 return signedIn() && resource.data.status == 'published' && ( resource.data.audience == 'all' || (resource.data.audience == 'individual' && resource.data.recipientUid ==
 request.auth.uid) || (resource.data.audience == 'seller' && (get(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)).data.accountType == 'seller' ||
 get(/databases/$(database)/documents/moakitUsers/$(request.auth.uid)).data.sellerStatus == 'approved')) || (resource.data.audience == 'buyer' &&
