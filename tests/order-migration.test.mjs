@@ -66,17 +66,27 @@ test('invalid/unsafe legacy records fail rather than creating fabricated purchas
  assert.throws(()=>orderFromLegacyPatternPurchase({...pattern,buyerUid:'different'},pattern.buyerUid));
  assert.throws(()=>orderFromLegacyKit({id:'k1',buyerUid:'uid',total:0,items:[]}));
 });
-test('new migration UI preserves previous sales, KIT order, and settlement operations',()=>{
+test('Firebase finance screens retire old D1 and Work import buttons without losing active settlement controls',()=>{
  const read=name=>readFileSync(new URL('../public/'+name,import.meta.url),'utf8');
  const admin=read('finance-firestore-admin.js');
+ const shell=read('finance-admin.js');
  const logic=read('finance-firestore.mjs');
- assert.match(admin,/data-fin-db-action="orders-all"/);
- assert.match(admin,/importLegacyPatternOrders/);
- assert.match(admin,/importLegacyKitOrders/);
- assert.match(admin,/importOrdersFromVerifiedSales/);
+ const actions=[...admin.matchAll(/data-fin-db-action="([^"]+)"/g)].map(match=>match[1]);
+ assert.deepEqual([...new Set(actions)],['refresh']);
+ for(const obsolete of [
+  'orders-all','audit','sales','kits','batches'
+ ])assert.ok(!actions.includes(obsolete),'retired button '+obsolete);
+ assert.doesNotMatch(admin,/auditWorkOrders|migrateAllOrders|importLegacySales|importLegacyKitOrders|importLegacySettlements|listLegacyPurchasePage|X-MOAKIT-LEGACY-VIEW/);
  assert.match(admin,/tallyOrderMatches/);
+ assert.match(admin,/reconcileTestFinance/);
+ assert.match(admin,/confirmTestSale\(order\)/);
+ assert.match(admin,/createTestSettlement\(settlementInput\)/);
+ assert.match(admin,/data-verify-order/);
+ assert.match(admin,/data-refund-pattern/);
+ assert.match(admin,/data-create-settlement/);
+ assert.doesNotMatch(shell,/legacyApi:api/);
+ assert.match(shell,/mountFirebaseFinanceAdmin\(body\)/);
  assert.match(logic,/currentDocument\.exists=false/);
  assert.match(logic,/sourceOrderId!==row\.sourceOrderId|saved\.productId!==row\.productId/);
- assert.match(admin,/importLegacySettlements/);
- assert.match(admin,/createTestSettlement/);
+ assert.match(logic,/importLegacySettlements/);
 });

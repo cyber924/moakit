@@ -15,7 +15,7 @@ export function mountFinanceAdmin(target,section='sales',options={}){
  function frame(){const tabs=section==='sales'?[['all','전체 매출'],['pattern','도안 판매'],['kit','KIT 판매'],['kit-orders','KIT 주문·배송'],['firebase','Firebase 통합']]:[['authors','작가별 정산'],['batches','정산 내역'],['terms','배분 기준 70:30'],['audit','처리 기록'],['firebase','Firebase 통합']];target.innerHTML=`<div class="admin-heading"><span>${section==='sales'?'SALES & REVENUE':'CREATOR SETTLEMENT'}</span><h1>${section==='sales'?'판매 관리':'정산 관리'}</h1><p>${section==='sales'?'도안과 KIT 판매를 구분하고 주문·환불·순매출을 확인합니다.':'작가별 배분 조건과 지급 명세를 검토하고 지급 기록을 보관합니다.'}</p></div><nav class="finance-tabs" aria-label="${section==='sales'?'판매':'정산'} 메뉴">${tabs.map(([id,label])=>button(label,`data-tab="${id}" aria-pressed="${id===currentTab}"`)).join('')}</nav><div class="finance-toolbar">${button('주문 내역 동기화','data-sync')}${button('저장 결과 새로고침','data-refresh')}<span data-sync-status role="status"></span></div><div data-finance-main></div><div data-finance-panel></div>`;target.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{if(busy)return;currentTab=b.dataset.tab;page=1;load();});target.querySelector('[data-refresh]').onclick=()=>load();target.querySelector('[data-sync]').onclick=sync;
  }
  async function load(){const mine=++epoch;if(!initialModeChecked&&!options.orders){initialModeChecked=true;if(await commerceMode()==='firebase')currentTab='firebase';}frame();const body=target.querySelector('[data-finance-main]');body.innerHTML='<p class="admin-loading" role="status">저장된 판매·정산 결과를 불러오고 있습니다.</p>';try{
- if(currentTab==='firebase'){await mountFirebaseFinanceAdmin(body,{legacyApi:api,criteria});return;}
+ if(currentTab==='firebase'){await mountFirebaseFinanceAdmin(body);return;}
  if(section==='sales'&&currentTab==='kit-orders'){mountKitOrders(body,{admin:true});return;}
  if(currentTab==='terms'){const d=await api('terms');if(live()&&mine===epoch)terms(body,d.terms);return;}
  if(currentTab==='audit'){const d=await api('audit');if(live()&&mine===epoch)body.innerHTML=`<section class="admin-card"><h2>최근 처리 기록 100건</h2>${d.logs.map(l=>`<details class="finance-log"><summary>${E(date(l.createdAt))} · ${E(l.action)} · ${E(l.actor)}</summary><pre>${E(JSON.stringify(l.details,null,2))}</pre></details>`).join('')||'<p>처리 기록이 없습니다.</p>'}</section>`;return;}
@@ -23,8 +23,8 @@ export function mountFinanceAdmin(target,section='sales',options={}){
  }catch(e){if(live()&&mine===epoch){
    if(['sales','settlements'].includes(section)&&currentTab!=='firebase'){
     try{
-     await mountFirebaseFinanceAdmin(body,{legacyApi:api,criteria});
-     if(body.isConnected)body.insertAdjacentHTML('afterbegin','<p class="admin-notice">기존 판매·정산 Work 서버 응답이 없어 Firebase 테스트 원장을 대신 표시합니다. 실제 결제·지급 자료가 아니라 검증된 테스트 기록입니다. Work 복구 후 기존 지급 기록을 다시 대조해주세요.</p>');
+     await mountFirebaseFinanceAdmin(body);
+     if(body.isConnected)body.insertAdjacentHTML('afterbegin','<p class="admin-notice">기존 조회 경로를 사용할 수 없어 Firebase 테스트 원장을 표시합니다. 실제 결제·지급 자료가 아닌 테스트 기록입니다.</p>');
     }catch(fallbackError){body.innerHTML=`<div class="admin-notice error" role="alert">${E(e.message)} · Firebase 대체 조회도 실패: ${E(fallbackError.message)}</div>`;}
    }else body.innerHTML=`<div class="admin-notice error" role="alert">${E(e.message)}</div>`;
   }}}
