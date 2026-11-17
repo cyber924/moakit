@@ -40,8 +40,18 @@ module.exports=function financeOperations({db,ref,now,json,fail,amount,revenueSp
     if(d.source!=='legacy-d1'||d.status!=='review'||d.rateBasis==='reviewed-historical')
      throw fail('아직 대조하지 않은 이전 정산서만 수정할 수 있습니다.',409);
     if(!amount(d.amount)||!amount(d.payout))throw fail('이전 정산서 금액 오류',409);
-    const computed=revenueSplit(d.amount,rate),stamp=now();
-    const patch={originalPayout:d.payout,originalPlatformShare:Number(d.platformShare||0),
+    const ids=String(d.saleIds||'').split(',').map(x=>x.trim()).filter(Boolean);
+    if(!ids.length||ids.length>100||new Set(ids).size!==ids.length||ids.some(x=>!validId(x)))
+     throw fail('연결된 판매 원본을 모두 확인할 수 없습니다.',409);
+    const docs=await Promise.all(ids.map(id=>tx.get(ref('moakitSales',id.startsWith('d1_')?id:'d1_'+id))));
+    const rows=docs.map(x=>x.exists?x.data():null);
+    if(rows.some(x=>!x||x.sellerUid!==d.sellerUid||!amount(x.amount)||x.status==='cancelled'))
+     throw fail('판매 원본 누락 또는 작가·금액 불일치로 정산할 수 없습니다.',409);
+    const gross=rows.reduce((sum,x)=>sum+x.amount,0);
+    if(!amount(gross))throw fail('판매 원본 합계를 확인해주세요.',409);
+    const computed=revenueSplit(gross,rate),stamp=now();
+    const saleSnapshot=rows.map((x,i)=>({id:ids[i],title:String(x.title||'상품').slice(0,150),amount:x.amount}));
+    const patch={originalAmount:d.amount,amount:gross,saleSnapshot,originalPayout:d.payout,originalPlatformShare:Number(d.platformShare||0),
      payout:computed.seller,platformShare:computed.platform,sellerBps:rate,
      rateBasis:'reviewed-historical',reviewedAt:stamp,reviewedBy:user.uid,
      updatedAt:stamp,version:Number(d.version||0)+1};
@@ -52,7 +62,7 @@ module.exports=function financeOperations({db,ref,now,json,fail,amount,revenueSp
   }
   if(action==='transitionSettlement'){
    const id=String(input.id||''),next=String(input.status||'');
-   if(!validId(id)||!['confirmed','paid'].includes(next)||input.acknowledged!==true)
+   if(!validId(id)||!['confirmed','paid','review'].includes(next)||input.acknowledged!==true)
     throw fail('정산서 처리 단계와 관리자 동의를 확인해주세요.');
    const paymentReference=String(input.paymentReference||'').trim();
    if(next==='paid'&&(input.paymentCompleted!==true||paymentReference.length<4||paymentReference.length>120))
@@ -61,15 +71,26 @@ module.exports=function financeOperations({db,ref,now,json,fail,amount,revenueSp
     const pointer=settlementRef(id),snap=await tx.get(pointer);
     if(!snap.exists)throw fail('정산서를 찾지 못했습니다.',404);
     const d=snap.data();
-    if(!((d.status==='review'&&next==='confirmed')||(d.status==='confirmed'&&next==='paid')))
+    if(!((d.status==='review'&&next==='confirmed')||(d.status==='confirmed'&&next==='paid')||(d.status==='confirmed'&&next==='review')))
      throw fail('정산서 처리 순서가 올바르지 않습니다.',409);
     if(d.source==='legacy-d1'&&d.rateBasis!=='reviewed-historical')
      throw fail('과거 정산서의 원본 금액을 먼저 검토해주세요.',409);
     if(!amount(d.amount)||!amount(d.payout)||!amount(d.platformShare)||d.payout+d.platformShare!==d.amount)
      throw fail('정산서의 판매금액과 배분 합계가 일치하지 않습니다.',409);
+    let saleSnapshot=d.saleSnapshot;
+    if(next==='confirmed'&&!Array.isArray(saleSnapshot)){
+     const ids=String(d.saleIds||'').split(',').map(x=>x.trim()).filter(Boolean);
+     if(!ids.length||ids.length>100||new Set(ids).size!==ids.length||ids.some(x=>!validId(x)))throw fail('판매 원본 식별자를 확인해주세요.',409);
+     const docs=await Promise.all(ids.map(id=>tx.get(ref('moakitSales',id))));
+     const rows=docs.map(x=>x.exists?x.data():null);
+     if(rows.some(x=>!x||x.sellerUid!==d.sellerUid||!amount(x.amount)||x.status==='cancelled')||rows.reduce((n,x)=>n+x.amount,0)!==d.amount)
+      throw fail('판매 원본과 정산 금액이 일치하지 않습니다.',409);
+     saleSnapshot=rows.map((x,i)=>({id:ids[i],title:String(x.title||'상품').slice(0,150),amount:x.amount,sellerShare:Number(x.sellerShare||0)}));
+    }
     const stamp=now(),patch={status:next,updatedAt:stamp,updatedBy:user.uid,
      version:Number(d.version||0)+1};
-    if(next==='confirmed'){patch.confirmedAt=stamp;patch.confirmedBy=user.uid;}
+    if(next==='confirmed'){patch.confirmedAt=stamp;patch.confirmedBy=user.uid;patch.saleSnapshot=saleSnapshot;}
+    else if(next==='review'){patch.confirmedAt='';patch.confirmedBy='';patch.returnedAt=stamp;patch.returnedBy=user.uid;}
     else{patch.paidAt=stamp;patch.paidBy=user.uid;patch.paid=d.payout;patch.paymentReference=paymentReference;}
     tx.update(pointer,patch);
     return {...d,...patch,id};
