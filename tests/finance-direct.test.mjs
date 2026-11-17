@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {reconcileTestFinance} from '../public/finance-reconciliation-core.mjs';
+const store=new Map();
+const ref=(...parts)=>({path:parts.join('/'),id:parts.at(-1)});
+const snap=r=>({id:r.id,exists:()=>store.has(r.path),data:()=>store.get(r.path)});
+const tx={get:async r=>snap(r),set:(r,v,opt)=>store.set(r.path,opt?.merge?{...store.get(r.path),...v}:v),update:(r,v)=>store.set(r.path,{...store.get(r.path),...v})};
+let next=0;
+globalThis.financeTest={firebaseApp:{},getFirestore:()=>({}),doc:(...a)=>a.length===1?ref(a[0].path,'auto'+ ++next):ref(a.at(-2),a.at(-1)),collection:(_db,c)=>ref(c),getDoc:async r=>snap(r),getDocs:async q=>({docs:[...store.entries()].filter(([k,v])=>k.startsWith(q.col.path+'/')&&v.sellerUid===q.value).map(([k,v])=>({id:k.split('/').at(-1),data:()=>v}))}),query:(col,w)=>({col,value:w.value}),where:(_field,_op,value)=>({value}),runTransaction:async(_db,fn)=>fn(tx),reconcileTestFinance};
+globalThis.window={MoaAccount:{user:{uid:'admin'}}};
+let source=await readFile(new URL('../public/finance-direct.mjs',import.meta.url),'utf8');
+source=source.replace(/import \{firebaseApp\}[^\n]+\n/,'').replace(/import \{getFirestore[^\n]+\n/,'').replace(/import \{reconcileTestFinance\}[^\n]+\n/,'');
+source='const {firebaseApp,getFirestore,doc,collection,getDoc,getDocs,query,where,runTransaction,reconcileTestFinance}=globalThis.financeTest;\n'+source;
+const {financeAction}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+test('legacy settlement calculates four original sales and transitions without Functions',async()=>{
+ store.clear();store.set('moakitSettlements/d1_batch',{id:'d1_batch',sellerUid:'writer',source:'legacy-d1',mode:'test',status:'review',amount:61600,payout:61600,platformShare:0,saleIds:'sale1,sale2,sale3,sale4'});
+ for(let i=1;i<=4;i++)store.set('moakitSales/d1_sale'+i,{sellerUid:'writer',amount:22000,title:'도안'});
+ let r=await financeAction({action:'reconcileLegacy',id:'d1_batch',sellerBps:8000,acknowledged:true});
+ assert.equal(r.settlement.amount,88000);assert.equal(r.settlement.payout,70400);assert.equal(r.settlement.platformShare,17600);
+ r=await financeAction({action:'transitionSettlement',id:'d1_batch',status:'confirmed',acknowledged:true});assert.equal(r.settlement.status,'confirmed');assert.equal(r.settlement.saleSnapshot.length,4);
+ await assert.rejects(financeAction({action:'transitionSettlement',id:'d1_batch',status:'paid',acknowledged:true,paymentCompleted:true,paymentReference:''}),/증빙/);
+ r=await financeAction({action:'transitionSettlement',id:'d1_batch',status:'paid',acknowledged:true,paymentCompleted:true,paymentReference:'bank-123'});assert.equal(r.settlement.paid,70400);
+});
+test('missing original sale aborts reconciliation',async()=>{store.clear();store.set('moakitSettlements/d1_batch',{sellerUid:'writer',source:'legacy-d1',status:'review',saleIds:'missing',amount:1,payout:1,platformShare:0});await assert.rejects(financeAction({action:'reconcileLegacy',id:'d1_batch',sellerBps:7000,acknowledged:true}),/원본 누락/);});
+test('creation uses current rate and prevents duplicate source sale',async()=>{
+ store.clear();store.set('moakitSettings/finance',{sellerBps:8000,version:1});store.set('moakitSales/one',{sellerUid:'writer',amount:22000,status:'reviewed',mode:'test',charged:0,sellerShare:15400});
+ const input={action:'createSettlement',sellerUid:'writer',sellerName:'작가',from:'2026-11-01',to:'2026-11-30',saleIds:['one']};
+ const r=await financeAction(input);assert.equal(r.settlement.payout,17600);assert.equal(r.settlement.platformShare,4400);
+ await assert.rejects(financeAction(input),/이미 정산/);
+});
